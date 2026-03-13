@@ -1,6 +1,7 @@
+import SmartApi
 import pyotp
 import pandas as pd
-from smartapi import SmartConnect
+from SmartApi.smartConnect import SmartConnect
 from config import (
     ANGEL_API_KEY,
     ANGEL_CLIENT_ID,
