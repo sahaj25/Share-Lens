@@ -1,0 +1,15 @@
+smartapi-python
+ta
+pandas
+numpy
+anthropic
+python-telegram-bot
+fastapi
+uvicorn
+apscheduler
+sqlalchemy
+psycopg2-binary
+python-dotenv
+websocket-client
+requests
+pyotp

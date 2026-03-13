@@ -1,0 +1,198 @@
+import anthropic
+from config import CLAUDE_API_KEY
+
+
+class ClaudeAgent:
+
+    def __init__(self):
+        self.client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+        self.model = "claude-sonnet-4-20250514"
+
+    def analyze_swing_signal(self, stock_data):
+        """
+        Takes swing scanner output
+        Returns AI validated analysis + plain language explanation
+        """
+        prompt = f"""
+You are an expert Indian stock market analyst specializing in technical analysis.
+Analyze this swing trading signal for {stock_data['symbol']} and provide a structured assessment.
+
+SIGNAL DATA:
+- Symbol: {stock_data['symbol']}
+- Signal: {stock_data['signal']}
+- Score: {stock_data['score']}/10
+- Entry: ₹{stock_data['entry']}
+- Stop Loss: ₹{stock_data['stop_loss']}
+- Target: ₹{stock_data['target']}
+- Risk/Reward: 1:{stock_data['risk_reward']}
+- Hold Period: {stock_data['hold_days']}
+- Trend: {stock_data['trend']}
+- RSI: {stock_data['rsi']} ({stock_data['rsi_zone']})
+- ADX: {stock_data['adx']} (Trend Strength)
+- Volume Ratio: {stock_data['volume_ratio']}x average
+- Near Support: {stock_data['near_support']}
+- Breakout: {stock_data['breakout']}
+
+Respond in EXACTLY this format, nothing else:
+
+CONFIDENCE: [HIGH/MEDIUM-HIGH/MEDIUM/LOW]
+REASONING: [2-3 lines explaining why this is a good/bad setup in simple terms]
+CAUTION: [Any red flags or risks to watch — 1 line, or write NONE]
+ACTION: [Exact actionable instruction — buy at what level, what to watch]
+"""
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=300,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return self.parse_swing_response(
+                response.content[0].text, stock_data
+            )
+
+        except Exception as e:
+            print(f"❌ Claude API error: {e}")
+            return self.fallback_analysis(stock_data)
+
+    def analyze_intraday_signal(self, stock_data):
+        """
+        Takes intraday scanner output
+        Returns AI validated analysis
+        """
+        prompt = f"""
+You are an expert Indian stock market analyst specializing in intraday trading.
+Analyze this intraday signal for {stock_data['symbol']}.
+
+SIGNAL DATA:
+- Symbol: {stock_data['symbol']}
+- Signal: {stock_data['signal']}
+- Score: {stock_data['score']}/10
+- Time: {stock_data['time']}
+- Entry: ₹{stock_data['entry']}
+- Stop Loss: ₹{stock_data['stop_loss']}
+- Target 1: ₹{stock_data['target_1']}
+- Target 2: ₹{stock_data['target_2']}
+- VWAP: ₹{stock_data['vwap']}
+- EMA 9: ₹{stock_data['ema_9']}
+- Volume Ratio: {stock_data['volume_ratio']}x average
+- RSI: {stock_data['rsi']}
+
+Respond in EXACTLY this format, nothing else:
+
+CONFIDENCE: [HIGH/MEDIUM-HIGH/MEDIUM/LOW]
+REASONING: [2 lines max — why this intraday setup is valid]
+CAUTION: [Any risk to watch — 1 line, or write NONE]
+ACTION: [Exact entry instruction — be specific]
+"""
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=200,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return self.parse_intraday_response(
+                response.content[0].text, stock_data
+            )
+
+        except Exception as e:
+            print(f"❌ Claude API error: {e}")
+            return self.fallback_intraday(stock_data)
+
+    def analyze_market_mood(self, bullish_count, total, mood):
+        """
+        AI commentary on overall market mood
+        Added to morning swing report
+        """
+        prompt = f"""
+You are an expert Indian stock market analyst.
+Give a 2 line market outlook based on this data:
+
+- Market Mood: {mood}
+- Bullish stocks: {bullish_count} out of {total} Nifty 50 stocks above EMA 20
+- Date: Today
+
+Be direct, practical, no fluff. 2 lines maximum.
+"""
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=100,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.content[0].text.strip()
+
+        except Exception as e:
+            print(f"❌ Claude API error: {e}")
+            return f"Market mood is {mood} with {bullish_count}/{total} stocks above EMA 20."
+
+    def parse_swing_response(self, text, stock_data):
+        """Parse Claude response into structured dict"""
+        lines = text.strip().split("\n")
+        result = {
+            "symbol": stock_data["symbol"],
+            "confidence": "MEDIUM",
+            "reasoning": "",
+            "caution": "NONE",
+            "action": ""
+        }
+
+        for line in lines:
+            if line.startswith("CONFIDENCE:"):
+                result["confidence"] = line.replace(
+                    "CONFIDENCE:", ""
+                ).strip()
+            elif line.startswith("REASONING:"):
+                result["reasoning"] = line.replace(
+                    "REASONING:", ""
+                ).strip()
+            elif line.startswith("CAUTION:"):
+                result["caution"] = line.replace(
+                    "CAUTION:", ""
+                ).strip()
+            elif line.startswith("ACTION:"):
+                result["action"] = line.replace(
+                    "ACTION:", ""
+                ).strip()
+
+        return result
+
+    def parse_intraday_response(self, text, stock_data):
+        """Parse intraday Claude response"""
+        return self.parse_swing_response(text, stock_data)
+
+    def fallback_analysis(self, stock_data):
+        """
+        Used when Claude API is unavailable
+        Returns basic analysis without AI
+        """
+        confidence = "HIGH" if stock_data["score"] >= 8.5 else \
+            "MEDIUM-HIGH" if stock_data["score"] >= 7.5 else "MEDIUM"
+
+        return {
+            "symbol": stock_data["symbol"],
+            "confidence": confidence,
+            "reasoning": f"{stock_data['trend']} trend with ADX {stock_data['adx']} "
+                         f"and RSI {stock_data['rsi']} in {stock_data['rsi_zone']} zone.",
+            "caution": "NONE",
+            "action": f"Enter at ₹{stock_data['entry']}, "
+                      f"SL ₹{stock_data['stop_loss']}, "
+                      f"Target ₹{stock_data['target']}"
+        }
+
+    def fallback_intraday(self, stock_data):
+        """Fallback for intraday when Claude API unavailable"""
+        return {
+            "symbol": stock_data["symbol"],
+            "confidence": "MEDIUM",
+            "reasoning": f"VWAP + EMA9 + Volume aligned for {stock_data['signal']} signal.",
+            "caution": "NONE",
+            "action": f"Enter at ₹{stock_data['entry']}, "
+                      f"SL ₹{stock_data['stop_loss']}, "
+                      f"Target ₹{stock_data['target_2']}"
+        }
+
+
+# Single instance
+claude_agent = ClaudeAgent()
