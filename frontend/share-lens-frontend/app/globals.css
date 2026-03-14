@@ -1,0 +1,73 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+
+@import "tailwindcss";
+
+:root {
+  --bg: #0d0d0d;
+  --bg-card: #161616;
+  --bg-elevated: #1e1e1e;
+  --bg-hover: #222222;
+  --border: #2a2a2a;
+  --border-light: #333333;
+  --accent-green: #00c96b;
+  --accent-red: #ff4d4d;
+  --accent-yellow: #f5a623;
+  --accent-blue: #4a9eff;
+  --text-primary: #ffffff;
+  --text-secondary: #a0a0a0;
+  --text-muted: #606060;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.fade-up { animation: fadeUp 0.35s ease forwards; opacity: 0; }
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.mono { font-family: 'DM Mono', monospace; }
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.tag-green { background: rgba(0,201,107,0.12); color: #00c96b; border: 1px solid rgba(0,201,107,0.2); }
+.tag-red   { background: rgba(255,77,77,0.12);  color: #ff4d4d; border: 1px solid rgba(255,77,77,0.2); }
+.tag-yellow{ background: rgba(245,166,35,0.12); color: #f5a623; border: 1px solid rgba(245,166,35,0.2); }
+.tag-blue  { background: rgba(74,158,255,0.12); color: #4a9eff; border: 1px solid rgba(74,158,255,0.2); }
+.tag-gray  { background: rgba(160,160,160,0.1); color: #a0a0a0; border: 1px solid rgba(160,160,160,0.15); }
