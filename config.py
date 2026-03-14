@@ -14,9 +14,9 @@ ANGEL_PASSWORD = os.getenv("ANGEL_PASSWORD")
 
 ANGEL_TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
 
-# Claude
+# GEMINI
 
-CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Telegram
 
