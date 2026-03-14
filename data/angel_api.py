@@ -1,4 +1,3 @@
-import SmartApi
 import pyotp
 import pandas as pd
 from SmartApi.smartConnect import SmartConnect
