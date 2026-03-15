@@ -98,13 +98,7 @@ export default function Sidebar() {
           <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
             9:15 AM – 3:30 PM
           </div>
-          <div style={{
-            marginTop: '8px', paddingTop: '8px',
-            borderTop: '1px solid var(--border)',
-            fontSize: '11px', color: 'var(--accent-green)', fontWeight: '600'
-          }}>
-            Running cost: ~Rs. 500/mo
-          </div>
+
         </div>
       </div>
     </aside>
