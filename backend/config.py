@@ -30,7 +30,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 # App
 
-APP_ENV = os.getenv("APP_ENV", "development")
+APP_ENV = os.getenv("APP_ENV", "production")
 
 # Nifty 50 stocks list
 
