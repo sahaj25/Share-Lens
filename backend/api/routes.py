@@ -26,7 +26,7 @@ async def startup():
 # ─────────────────────────────────────────
 # Health Check
 # ─────────────────────────────────────────
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {
         "status": "alive",
@@ -35,13 +35,12 @@ async def root():
     }
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat()
     }
-
 
 # ─────────────────────────────────────────
 # Manual Trigger Endpoints
