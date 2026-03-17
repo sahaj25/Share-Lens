@@ -54,15 +54,20 @@ def main():
 
     # Step 5 — Login to Angel One
     print("\n🔐 Logging into Angel One...")
-    from data.angel_api import angel
-    login_success = angel.login()
-
-    if login_success:
-        print("✅ Angel One connected")
-    else:
-        print("⚠️ Angel One login failed — check credentials in .env")
+    try:
+        from data.angel_api import angel
+        login_success = angel.login()
+        if login_success:
+            print("✅ Angel One connected")
+        else:
+            print("⚠️ Angel One login failed — running without market data")
+            telegram_bot.send_message(
+                "⚠️ Angel One login failed. Tool running without market data. Add API keys when ready."
+            )
+    except Exception as e:
+        print(f"⚠️ Angel One error: {e} — continuing without market data")
         telegram_bot.send_message(
-            "⚠️ <b>WARNING:</b> Angel One login failed. Check API credentials."
+            "⚠️ Angel One unavailable. Tool running in limited mode."
         )
 
     # Handle shutdown gracefully
@@ -77,15 +82,23 @@ def main():
     print("=" * 50 + "\n")
 
     # Keep running forever
-    while True:
-        time.sleep(60)
-        # Re-login to Angel One every 6 hours
-        # (sessions expire)
-        current_hour = datetime.now().hour
-        current_minute = datetime.now().minute
-        if current_minute == 0 and current_hour in [6, 12, 18, 0]:
-            print("🔄 Re-logging into Angel One...")
-            angel.login()
+    # Step 5 — Login to Angel One
+    print("\n🔐 Logging into Angel One...")
+    try:
+        from data.angel_api import angel
+        login_success = angel.login()
+        if login_success:
+            print("✅ Angel One connected")
+        else:
+            print("⚠️ Angel One login failed — running without market data")
+            telegram_bot.send_message(
+                "⚠️ Angel One login failed. Tool running without market data. Add API keys when ready."
+            )
+    except Exception as e:
+        print(f"⚠️ Angel One error: {e} — continuing without market data")
+        telegram_bot.send_message(
+            "⚠️ Angel One unavailable. Tool running in limited mode."
+        )
 
 
 if __name__ == "__main__":
