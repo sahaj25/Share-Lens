@@ -1,5 +1,4 @@
 import os
-import time
 import signal
 import sys
 from datetime import datetime
@@ -26,46 +25,25 @@ def main():
     print("\n📦 Setting up database...")
     create_tables()
 
-    # Step 2 — Start scheduler
+    # Step 2 — Start scheduler (safe)
     print("\n⏱ Starting scheduler...")
-try:
-    scheduler = create_scheduler()
-    scheduler.start()
-    print("✅ Scheduler started — all jobs scheduled")
+    try:
+        scheduler = create_scheduler()
+        scheduler.start()
+        print("✅ Scheduler started — all jobs scheduled")
 
-    print("\n📋 Scheduled Jobs:")
-    for job in scheduler.get_jobs():
-        print(f"  → {job.name}")
+        print("\n📋 Scheduled Jobs:")
+        for job in scheduler.get_jobs():
+            print(f"  → {job.name}")
 
-except Exception as e:
-    print(f"❌ Scheduler failed to start: {e}")
-    print("✅ Scheduler started — all jobs scheduled")
+    except Exception as e:
+        print(f"❌ Scheduler failed to start: {e}")
 
-    # Print scheduled jobs
-    print("\n📋 Scheduled Jobs:")
-    for job in scheduler.get_jobs():
-        print(f"  → {job.name}")
-
-    # Step 3 — Start FastAPI in background thread
-    print("\n🌐 Starting FastAPI server...")
-    import threading
-    import uvicorn
-    from api.routes import app
-
-    def run_api():
-        port = int(os.environ.get("PORT", 8000))
-        print(f"Running on port: {port}")
-        uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
-
-    api_thread = threading.Thread(target=run_api, daemon=True)
-    api_thread.start()
-    print("✅ API server started")
-
-    # Step 4 — Send startup alert
+    # Step 3 — Send startup alert
     print("\n📱 Sending startup alert...")
     telegram_bot.send_restart_alert()
 
-    # Step 5 — Login to Angel One (single block only)
+    # Step 4 — Login to Angel One
     print("\n🔐 Logging into Angel One...")
     try:
         from data.angel_api import angel
@@ -92,24 +70,17 @@ except Exception as e:
     print("\n" + "=" * 50)
     print("✅ TRADING TOOL IS RUNNING")
     print("📱 Check Telegram for alerts")
-    print("🌐 API running")
+    print("🌐 API starting...")
     print("=" * 50 + "\n")
 
-    # Step 6 — Keep app alive (CRITICAL for Render)
-    while True:
-        time.sleep(300)
-        try:
-            current_hour = datetime.now().hour
-            current_minute = datetime.now().minute
+    # Step 5 — Start FastAPI (MAIN THREAD - REQUIRED)
+    import uvicorn
+    from api.routes import app
 
-            # Re-login every few hours (session expiry safety)
-            if current_minute < 5 and current_hour in [6, 12, 18]:
-                from data.angel_api import angel
-                angel.login()
-                print("🔄 Angel session refreshed")
+    port = int(os.environ.get("PORT", 8000))
+    print(f"🌐 Running API on port {port}")
 
-        except Exception as e:
-            print(f"⚠️ Re-login error: {e}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
