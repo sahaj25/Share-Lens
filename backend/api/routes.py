@@ -1,10 +1,19 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
 from database.queries import db_queries
 from database.models import create_tables
 
 app = FastAPI(title="Trading Tool API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://sharelens.vercel.app", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # Create tables on startup
@@ -17,7 +26,7 @@ async def startup():
 # ─────────────────────────────────────────
 # Health Check
 # ─────────────────────────────────────────
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {
         "status": "alive",
@@ -26,13 +35,12 @@ async def root():
     }
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat()
     }
-
 
 # ─────────────────────────────────────────
 # Manual Trigger Endpoints
