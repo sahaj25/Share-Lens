@@ -28,8 +28,17 @@ def main():
 
     # Step 2 — Start scheduler
     print("\n⏱ Starting scheduler...")
+try:
     scheduler = create_scheduler()
     scheduler.start()
+    print("✅ Scheduler started — all jobs scheduled")
+
+    print("\n📋 Scheduled Jobs:")
+    for job in scheduler.get_jobs():
+        print(f"  → {job.name}")
+
+except Exception as e:
+    print(f"❌ Scheduler failed to start: {e}")
     print("✅ Scheduler started — all jobs scheduled")
 
     # Print scheduled jobs
