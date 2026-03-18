@@ -26,42 +26,44 @@ def main():
     create_tables()
 
     # Step 2 — Start scheduler (safe)
-    print("\n⏱ Starting scheduler...")
-    try:
-        scheduler = create_scheduler()
-        scheduler.start()
-        print("✅ Scheduler started — all jobs scheduled")
+    # print("\n⏱ Starting scheduler...")
+    # try:
+    #     scheduler = create_scheduler()
+    #     scheduler.start()
+    #     print("✅ Scheduler started — all jobs scheduled")
 
-        print("\n📋 Scheduled Jobs:")
-        for job in scheduler.get_jobs():
-            print(f"  → {job.name}")
+    #     print("\n📋 Scheduled Jobs:")
+    #     for job in scheduler.get_jobs():
+    #         print(f"  → {job.name}")
 
-    except Exception as e:
-        print(f"❌ Scheduler failed to start: {e}")
+    # except Exception as e:
+    #     print(f"❌ Scheduler failed to start: {e}")
+
+    print("⚠️ Scheduler disabled for debugging")
 
     # Step 3 — Send startup alert
     print("\n📱 Sending startup alert...")
     telegram_bot.send_restart_alert()
 
     # Step 4 — Login to Angel One
-    print("\n🔐 Logging into Angel One...")
-    try:
-        from data.angel_api import angel
-        login_success = angel.login()
+    # print("\n🔐 Logging into Angel One...")
+    # try:
+    #     from data.angel_api import angel
+    #     login_success = angel.login()
 
-        if login_success:
-            print("✅ Angel One connected")
-        else:
-            print("⚠️ Angel One login failed — running without market data")
-            telegram_bot.send_message(
-                "⚠️ Angel One login failed. Tool running without market data."
-            )
+    #     if login_success:
+    #         print("✅ Angel One connected")
+    #     else:
+    #         print("⚠️ Angel One login failed — running without market data")
+    #         telegram_bot.send_message(
+    #             "⚠️ Angel One login failed. Tool running without market data."
+    #         )
 
-    except Exception as e:
-        print(f"⚠️ Angel One error: {e}")
-        telegram_bot.send_message(
-            "⚠️ Angel One unavailable. Tool running in limited mode."
-        )
+    # except Exception as e:
+    #     print(f"⚠️ Angel One error: {e}")
+    #     telegram_bot.send_message(
+    #         "⚠️ Angel One unavailable. Tool running in limited mode."
+    #     )
 
     # Handle shutdown
     signal.signal(signal.SIGINT, handle_shutdown)
