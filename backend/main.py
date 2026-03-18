@@ -25,45 +25,29 @@ def main():
     print("\n📦 Setting up database...")
     create_tables()
 
-    # Step 2 — Start scheduler (safe)
-    # print("\n⏱ Starting scheduler...")
-    # try:
-    #     scheduler = create_scheduler()
-    #     scheduler.start()
-    #     print("✅ Scheduler started — all jobs scheduled")
+    # Step 2 — Start scheduler (SAFE)
+    print("\n⏱ Starting scheduler...")
+    try:
+        scheduler = create_scheduler()
 
-    #     print("\n📋 Scheduled Jobs:")
-    #     for job in scheduler.get_jobs():
-    #         print(f"  → {job.name}")
+        # Prevent duplicate start
+        if not scheduler.running:
+            scheduler.start()
+            print("✅ Scheduler started")
 
-    # except Exception as e:
-    #     print(f"❌ Scheduler failed to start: {e}")
+        print("\n📋 Scheduled Jobs:")
+        for job in scheduler.get_jobs():
+            print(f"  → {job.name}")
 
-    print("⚠️ Scheduler disabled for debugging")
+    except Exception as e:
+        print(f"❌ Scheduler failed: {e}")
 
     # Step 3 — Send startup alert
     print("\n📱 Sending startup alert...")
     telegram_bot.send_restart_alert()
 
-    # Step 4 — Login to Angel One
-    # print("\n🔐 Logging into Angel One...")
-    # try:
-    #     from data.angel_api import angel
-    #     login_success = angel.login()
-
-    #     if login_success:
-    #         print("✅ Angel One connected")
-    #     else:
-    #         print("⚠️ Angel One login failed — running without market data")
-    #         telegram_bot.send_message(
-    #             "⚠️ Angel One login failed. Tool running without market data."
-    #         )
-
-    # except Exception as e:
-    #     print(f"⚠️ Angel One error: {e}")
-    #     telegram_bot.send_message(
-    #         "⚠️ Angel One unavailable. Tool running in limited mode."
-    #     )
+    # Step 4 — Angel API (still disabled for safety)
+    print("⚠️ Angel API disabled for now")
 
     # Handle shutdown
     signal.signal(signal.SIGINT, handle_shutdown)
@@ -75,7 +59,7 @@ def main():
     print("🌐 API starting...")
     print("=" * 50 + "\n")
 
-    # Step 5 — Start FastAPI (MAIN THREAD - REQUIRED)
+    # Step 5 — Start FastAPI (MAIN THREAD)
     import uvicorn
     from api.routes import app
 
