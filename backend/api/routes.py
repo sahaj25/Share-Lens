@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
+from fastapi import Request
 
 from database.queries import db_queries
 from database.models import create_tables
@@ -27,9 +28,9 @@ async def startup():
 # ─────────────────────────────────────────
 # Health Check (FIXED)
 # ─────────────────────────────────────────
-@app.get("/")
-async def root():
-    return {"status": "ok"}   # ✅ simplified for uptime robot
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root(request: Request):
+    return {"status": "ok"}
 
 
 @app.get("/health")
