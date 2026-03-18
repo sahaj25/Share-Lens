@@ -3,6 +3,7 @@ import time
 import signal
 import sys
 from datetime import datetime
+
 from database.models import create_tables
 from scheduler.jobs import create_scheduler
 from alerts.telegram_bot import telegram_bot
@@ -43,66 +44,63 @@ def main():
     from api.routes import app
 
     def run_api():
-         port = int(os.environ.get("PORT", 8000))
-         uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
-
-         print("Running on port:", port)
+        port = int(os.environ.get("PORT", 8000))
+        print(f"Running on port: {port}")
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
 
     api_thread = threading.Thread(target=run_api, daemon=True)
     api_thread.start()
-    print("✅ API server running on port 8000")
+    print("✅ API server started")
 
-    # Step 4 — Send startup alert to Telegram
+    # Step 4 — Send startup alert
     print("\n📱 Sending startup alert...")
     telegram_bot.send_restart_alert()
 
-    # Step 5 — Login to Angel One
+    # Step 5 — Login to Angel One (single block only)
     print("\n🔐 Logging into Angel One...")
     try:
         from data.angel_api import angel
         login_success = angel.login()
+
         if login_success:
             print("✅ Angel One connected")
         else:
             print("⚠️ Angel One login failed — running without market data")
             telegram_bot.send_message(
-                "⚠️ Angel One login failed. Tool running without market data. Add API keys when ready."
+                "⚠️ Angel One login failed. Tool running without market data."
             )
+
     except Exception as e:
-        print(f"⚠️ Angel One error: {e} — continuing without market data")
+        print(f"⚠️ Angel One error: {e}")
         telegram_bot.send_message(
             "⚠️ Angel One unavailable. Tool running in limited mode."
         )
 
-    # Handle shutdown gracefully
+    # Handle shutdown
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)
 
     print("\n" + "=" * 50)
     print("✅ TRADING TOOL IS RUNNING")
     print("📱 Check Telegram for alerts")
-    print("🌐 API running at http://localhost:8000")
-    print("Press Ctrl+C to stop")
+    print("🌐 API running")
     print("=" * 50 + "\n")
 
-    # Keep running forever
-    # Step 5 — Login to Angel One
-    print("\n🔐 Logging into Angel One...")
-    try:
-        from data.angel_api import angel
-        login_success = angel.login()
-        if login_success:
-            print("✅ Angel One connected")
-        else:
-            print("⚠️ Angel One login failed — running without market data")
-            telegram_bot.send_message(
-                "⚠️ Angel One login failed. Tool running without market data. Add API keys when ready."
-            )
-    except Exception as e:
-        print(f"⚠️ Angel One error: {e} — continuing without market data")
-        telegram_bot.send_message(
-            "⚠️ Angel One unavailable. Tool running in limited mode."
-        )
+    # Step 6 — Keep app alive (CRITICAL for Render)
+    while True:
+        time.sleep(300)
+        try:
+            current_hour = datetime.now().hour
+            current_minute = datetime.now().minute
+
+            # Re-login every few hours (session expiry safety)
+            if current_minute < 5 and current_hour in [6, 12, 18]:
+                from data.angel_api import angel
+                angel.login()
+                print("🔄 Angel session refreshed")
+
+        except Exception as e:
+            print(f"⚠️ Re-login error: {e}")
 
 
 if __name__ == "__main__":

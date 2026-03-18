@@ -2,11 +2,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
+
 from database.queries import db_queries
 from database.models import create_tables
 
 app = FastAPI(title="Trading Tool API", version="1.0.0")
 
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://sharelens.vercel.app", "http://localhost:3000"],
@@ -15,8 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# Create tables on startup
+# Startup
 @app.on_event("startup")
 async def startup():
     create_tables()
@@ -24,30 +25,26 @@ async def startup():
 
 
 # ─────────────────────────────────────────
-# Health Check
+# Health Check (FIXED)
 # ─────────────────────────────────────────
-@app.api_route("/", methods=["GET", "HEAD"])
+@app.get("/")
 async def root():
-    return {
-        "status": "alive",
-        "time": datetime.now().strftime("%d %B %Y %H:%M"),
-        "message": "Trading Tool is running"
-    }
+    return {"status": "ok"}   # ✅ simplified for uptime robot
 
 
-@app.api_route("/health", methods=["GET", "HEAD"])
+@app.get("/health")
 async def health():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat()
     }
 
+
 # ─────────────────────────────────────────
 # Manual Trigger Endpoints
 # ─────────────────────────────────────────
 @app.post("/trigger/swing-scan")
 async def trigger_swing_scan():
-    """Manually trigger swing scan anytime"""
     try:
         from scheduler.jobs import job_swing_scan
         job_swing_scan()
@@ -58,7 +55,6 @@ async def trigger_swing_scan():
 
 @app.post("/trigger/intraday-scan")
 async def trigger_intraday_scan():
-    """Manually trigger intraday scan"""
     try:
         from scheduler.jobs import job_intraday_scan
         job_intraday_scan()
@@ -69,7 +65,6 @@ async def trigger_intraday_scan():
 
 @app.post("/trigger/eod-summary")
 async def trigger_eod_summary():
-    """Manually trigger EOD summary"""
     try:
         from scheduler.jobs import job_eod_summary
         job_eod_summary()
@@ -79,16 +74,13 @@ async def trigger_eod_summary():
 
 
 # ─────────────────────────────────────────
-# Signals Endpoints
+# Signals
 # ─────────────────────────────────────────
 @app.get("/signals")
 async def get_signals(trade_type: str = None, limit: int = 50):
-    """Get recent signals"""
     try:
-        signals = db_queries.get_all_signals(
-            trade_type=trade_type,
-            limit=limit
-        )
+        signals = db_queries.get_all_signals(trade_type=trade_type, limit=limit)
+
         return {
             "status": "success",
             "count": len(signals),
@@ -112,16 +104,16 @@ async def get_signals(trade_type: str = None, limit: int = 50):
                 for s in signals
             ]
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─────────────────────────────────────────
-# Positions Endpoints
+# Positions
 # ─────────────────────────────────────────
 @app.get("/positions/open")
 async def get_open_positions():
-    """Get all open positions"""
     try:
         positions = db_queries.get_open_positions()
         return {
@@ -146,7 +138,6 @@ class OpenPositionRequest(BaseModel):
 
 @app.post("/positions/open")
 async def open_position(request: OpenPositionRequest):
-    """Log a new trade entry"""
     try:
         signal_data = {
             "symbol": request.symbol,
@@ -155,16 +146,19 @@ async def open_position(request: OpenPositionRequest):
             "stop_loss": request.stop_loss,
             "target": request.target
         }
+
         db_queries.open_position(
             signal_data=signal_data,
             quantity=request.quantity,
             capital_used=request.capital_used,
             trade_type=request.trade_type
         )
+
         return {
             "status": "success",
             "message": f"Position opened for {request.symbol}"
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -177,38 +171,41 @@ class ClosePositionRequest(BaseModel):
 
 @app.post("/positions/close")
 async def close_position(request: ClosePositionRequest):
-    """Manually close a position"""
     try:
         db_queries.close_position(
             symbol=request.symbol,
             exit_price=request.exit_price,
             exit_reason=request.exit_reason
         )
+
         return {
             "status": "success",
             "message": f"Position closed for {request.symbol}"
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─────────────────────────────────────────
-# Performance Endpoints
+# Performance
 # ─────────────────────────────────────────
 @app.get("/performance")
 async def get_performance():
-    """Get overall performance summary"""
     try:
         summary = db_queries.get_performance_summary()
+
         if not summary:
             return {
                 "status": "success",
                 "message": "No closed trades yet",
                 "data": None
             }
+
         return {
             "status": "success",
             "data": summary
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
