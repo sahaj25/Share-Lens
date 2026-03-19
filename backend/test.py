@@ -54,7 +54,7 @@ else:
     print(f"Support: {latest['support']} | Close: {latest['close']}")
 
 print("\n🧪 TEST 4 — Gemini AI")
-from ai.claude_agent import claude_agent
+from ai.gemini_agent import gemini_agent
 
 test_signal = {
     "symbol": "HDFCBANK",
@@ -74,7 +74,7 @@ test_signal = {
     "breakout": False
 }
 
-result = claude_agent.analyze_swing_signal(test_signal)
+result = gemini_agent.analyze_swing_signal(test_signal)
 print(f"✅ Confidence: {result['confidence']}")
 print(f"✅ Reasoning: {result['reasoning']}")
 print(f"✅ Caution: {result['caution']}")

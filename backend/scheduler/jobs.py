@@ -1,194 +1,122 @@
 from apscheduler.schedulers.background import BackgroundScheduler
-
 from apscheduler.triggers.cron import CronTrigger
-
 from datetime import datetime
-
 from config import (
-
     SWING_SCAN_TIME,
-
     INTRADAY_START_TIME,
-
     INTRADAY_END_TIME,
-
     EOD_SUMMARY_TIME
-
 )
 
 # NSE Holiday list 2026 — update every year
-
 NSE_HOLIDAYS_2026 = [
-
     "2026-01-26",  # Republic Day
-
     "2026-03-25",  # Holi
-
     "2026-04-02",  # Ram Navami
-
     "2026-04-14",  # Dr. Ambedkar Jayanti
-
     "2026-04-17",  # Good Friday
-
     "2026-05-01",  # Maharashtra Day
-
     "2026-08-15",  # Independence Day
-
     "2026-08-27",  # Ganesh Chaturthi
-
     "2026-10-02",  # Gandhi Jayanti
-
     "2026-10-20",  # Diwali Laxmi Pujan
-
     "2026-10-21",  # Diwali Balipratipada
-
     "2026-11-04",  # Gurunanak Jayanti
-
     "2026-12-25",  # Christmas
-
 ]
 
 
 def is_market_holiday():
     """Check if today is a market holiday"""
-
     today = datetime.now().strftime("%Y-%m-%d")
-
     return today in NSE_HOLIDAYS_2026
 
 
 def is_weekday():
-    """Check if today is a weekday"""
-
-    return datetime.now().weekday() < 5  # 0-4 = Mon-Fri
+    """Check if today is a weekday (Mon–Fri)"""
+    return datetime.now().weekday() < 5
 
 
 def should_run():
-    """Combined check — weekday and not holiday"""
-
+    """Combined check — weekday and not a market holiday"""
     return is_weekday() and not is_market_holiday()
 
 
 # ─────────────────────────────────────────
-
 # Job Functions
-
 # ─────────────────────────────────────────
 
 def job_health_check():
     """8:00 AM — daily health check"""
-
     from alerts.telegram_bot import telegram_bot
 
     if not should_run():
         return
 
     print("⏰ Running health check...")
-
     telegram_bot.send_health_check()
 
 
 def job_swing_scan():
     """8:30 AM — morning swing scan"""
-
     from scanners.swing_scanner import swing_scanner
-
-    from ai.claude_agent import claude_agent
-
+    from ai.gemini_agent import gemini_agent
     from alerts.telegram_bot import telegram_bot
-
     from database.queries import db_queries
 
     if not should_run():
         today = datetime.now().strftime("%d %B %Y")
-
-        from alerts.telegram_bot import telegram_bot
-
         telegram_bot.send_holiday_alert(today)
-
         return
 
     print("🔍 Running swing scan...")
 
-    # Run scan
-
     opportunities = swing_scanner.scan_all()
-
-    # Get market mood
-
     mood, bullish_count, total = swing_scanner.get_market_mood()
 
-    # AI market commentary
-
-    ai_commentary = claude_agent.analyze_market_mood(
-
-        bullish_count, total, mood
-
-    )
-
-    # Add AI analysis to each opportunity
+    ai_commentary = gemini_agent.analyze_market_mood(bullish_count, total, mood)
 
     for opp in opportunities:
-        ai_analysis = claude_agent.analyze_swing_signal(opp)
-
+        ai_analysis = gemini_agent.analyze_swing_signal(opp)
         opp["ai_analysis"] = ai_analysis
-
-        # Save signal to database
-
         db_queries.save_signal(opp, ai_analysis, "SWING")
 
-    # Send Telegram report
-
     telegram_bot.send_swing_report(
-
         opportunities=opportunities,
-
         market_mood=mood,
-
         bullish_count=bullish_count,
-
         total=total,
-
         ai_commentary=ai_commentary
-
     )
 
     print(f"✅ Swing scan complete — {len(opportunities)} opportunities sent")
 
 
 def job_intraday_scan():
-    """Every 5 mins 9:15 AM - 11:00 AM"""
-
+    """Every 5 mins 9:15 AM – 11:00 AM"""
     from scanners.intraday_scanner import intraday_scanner
-
-    from ai.claude_agent import claude_agent
-
+    from ai.gemini_agent import gemini_agent
     from alerts.telegram_bot import telegram_bot
-
     from database.queries import db_queries
 
     if not should_run():
         return
 
-    print(f"⚡ Intraday scan — {datetime.now().strftime('%H:%M')}")
+    # Extra time-gate so stray triggers outside window are ignored
+    now   = datetime.now().time()
+    start = datetime.strptime("09:15", "%H:%M").time()
+    end   = datetime.strptime("11:00", "%H:%M").time()
+    if not (start <= now <= end):
+        return
 
-    # Run scan
+    print(f"⚡ Intraday scan — {datetime.now().strftime('%H:%M')}")
 
     opportunities = intraday_scanner.scan_all()
 
-    # Send alert for each opportunity
-
     for opp in opportunities:
-        ai_analysis = claude_agent.analyze_intraday_signal(opp)
-
+        ai_analysis = gemini_agent.analyze_intraday_signal(opp)
         opp["ai_analysis"] = ai_analysis
-
-        # Save to database
-
         db_queries.save_signal(opp, ai_analysis, "INTRADAY")
-
-        # Send Telegram alert
-
         telegram_bot.send_intraday_alert(opp)
 
     if opportunities:
@@ -196,11 +124,17 @@ def job_intraday_scan():
 
 
 def job_position_monitor():
-    """Every 1 min during market hours 9:15 AM - 3:30 PM"""
-
+    """Every 1 min during market hours 9:15 AM – 3:30 PM"""
     from monitor.position_monitor import position_monitor
 
     if not should_run():
+        return
+
+    # Extra time-gate — do not run before/after market hours
+    now   = datetime.now().time()
+    start = datetime.strptime("09:15", "%H:%M").time()
+    end   = datetime.strptime("15:30", "%H:%M").time()
+    if not (start <= now <= end):
         return
 
     position_monitor.monitor_all()
@@ -208,13 +142,8 @@ def job_position_monitor():
 
 def job_eod_summary():
     """3:20 PM — end of day summary"""
-
     from monitor.position_monitor import position_monitor
-
     from scanners.swing_scanner import swing_scanner
-
-    from ai.claude_agent import claude_agent
-
     from alerts.telegram_bot import telegram_bot
 
     if not should_run():
@@ -222,32 +151,16 @@ def job_eod_summary():
 
     print("📊 Running EOD summary...")
 
-    # Get open positions summary
-
     open_positions = position_monitor.get_open_positions_summary()
-
-    # Run evening swing scan for tomorrow's setups
-
-    new_setups = swing_scanner.scan_all()
-
-    # Get market mood
-
+    new_setups     = swing_scanner.scan_all()
     mood, bullish_count, total = swing_scanner.get_market_mood()
 
-    # Send EOD summary
-
     telegram_bot.send_eod_summary(
-
         open_positions=open_positions,
-
         new_setups=new_setups,
-
         market_mood=mood,
-
         bullish_count=bullish_count,
-
         total=total
-
     )
 
     print("✅ EOD summary sent")
@@ -255,150 +168,104 @@ def job_eod_summary():
 
 def job_intraday_reset():
     """9:00 AM — reset intraday scanner for new day"""
-
     from scanners.intraday_scanner import intraday_scanner
 
     if not should_run():
         return
 
     intraday_scanner.reset_daily()
-
     print("🔄 Intraday scanner reset")
 
 
+# ──────────────────────────────────────────────────────────────
+# ✅ ADDED HERE — Keep-alive job (prevents Render from sleeping)
+# Placed ABOVE create_scheduler() so the function exists
+# before it is referenced inside scheduler.add_job()
+# ──────────────────────────────────────────────────────────────
+def job_keep_alive():
+    """Pings own /health endpoint every 10 mins to prevent Render sleep"""
+    import requests
+    import os
+    try:
+        url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8000")
+        requests.get(f"{url}/health", timeout=5)
+        print("💓 Keep-alive ping sent")
+    except Exception as e:
+        print(f"⚠️ Keep-alive failed: {e}")
+
+
 # ─────────────────────────────────────────
-
 # Scheduler Setup
-
 # ─────────────────────────────────────────
 
 def create_scheduler():
-    """Create and configure the scheduler"""
+    """Create and configure the APScheduler instance"""
 
     scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 
-    # Health check — 8:00 AM every weekday
-
+    # ── 8:00 AM — Health check ──
     scheduler.add_job(
-
         job_health_check,
-
         CronTrigger(hour=8, minute=0, day_of_week="mon-fri"),
-
         id="health_check",
-
         name="Daily Health Check"
-
     )
 
-    # Intraday reset — 9:00 AM every weekday
-
+    # ── 8:30 AM — Swing scan ──
     scheduler.add_job(
-
-        job_intraday_reset,
-
-        CronTrigger(hour=9, minute=0, day_of_week="mon-fri"),
-
-        id="intraday_reset",
-
-        name="Intraday Reset"
-
-    )
-
-    # Swing scan — 8:30 AM every weekday
-
-    scheduler.add_job(
-
         job_swing_scan,
-
         CronTrigger(hour=8, minute=30, day_of_week="mon-fri"),
-
         id="swing_scan",
-
         name="Morning Swing Scan"
-
     )
 
-    # Intraday scan — every 5 mins 9:15 AM to 11:00 AM
-
+    # ── 9:00 AM — Intraday scanner reset ──
     scheduler.add_job(
-
-        job_intraday_scan,
-
-        CronTrigger(
-
-            hour="9-10",
-
-            minute="15,20,25,30,35,40,45,50,55",
-
-            day_of_week="mon-fri"
-
-        ),
-
-        id="intraday_scan",
-
-        name="Intraday Scanner"
-
+        job_intraday_reset,
+        CronTrigger(hour=9, minute=0, day_of_week="mon-fri"),
+        id="intraday_reset",
+        name="Intraday Reset"
     )
 
-    # Also run at 10:00 and 10:05 to 11:00
-
+    # ── 9:15 AM – 11:00 AM — Intraday scan every 5 mins ──
     scheduler.add_job(
-
         job_intraday_scan,
-
         CronTrigger(
-
-            hour="10",
-
+            hour="9,10,11",
             minute="0,5,10,15,20,25,30,35,40,45,50,55",
-
             day_of_week="mon-fri"
-
         ),
-
-        id="intraday_scan_10",
-
-        name="Intraday Scanner 10AM"
-
+        id="intraday_scan",
+        name="Intraday Scanner (9:15–11:00)"
     )
 
-    # Position monitor — every 1 min 9:15 AM to 3:30 PM
-
+    # ── 9:15 AM – 3:30 PM — Position monitor every 1 min ──
     scheduler.add_job(
-
         job_position_monitor,
-
         CronTrigger(
-
-            hour="9-15",
-
+            hour="9,10,11,12,13,14,15",
             minute="*",
-
             day_of_week="mon-fri"
-
         ),
-
         id="position_monitor",
-
         name="Position Monitor"
-
     )
 
-    # EOD summary — 3:20 PM every weekday
-
+    # ── 3:20 PM — EOD summary ──
     scheduler.add_job(
-
         job_eod_summary,
-
         CronTrigger(hour=15, minute=20, day_of_week="mon-fri"),
-
         id="eod_summary",
-
         name="EOD Summary"
+    )
 
+    # ── Every 10 mins, all day — Render keep-alive ──  ✅ ADDED HERE
+    # Must be the last job added — runs 24/7 regardless of market hours
+    scheduler.add_job(
+        job_keep_alive,
+        CronTrigger(minute="*/10"),
+        id="keep_alive",
+        name="Render Keep-Alive"
     )
 
     return scheduler
-
-
