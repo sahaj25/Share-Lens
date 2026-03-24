@@ -203,6 +203,8 @@ def create_scheduler():
 
     scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 
+    print("TIMEZONE:", scheduler.timezone)  
+
     # ── 8:00 AM — Health check ──
     scheduler.add_job(
         job_health_check,
