@@ -204,13 +204,15 @@ def create_scheduler():
     scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 
     # ── 8:00 AM — Health check ──
-    scheduler.add_job(
-        job_health_check,
-        # CronTrigger(hour=8, minute=0, day_of_week="mon-fri"),
-        CronTrigger(hour=0, minute=10),
-        id="health_check",
-        name="Daily Health Check"
-    )
+scheduler.add_job(
+    job_swing_scan,
+    CronTrigger(hour=8, minute=30, day_of_week="mon-fri"),
+    id="swing_scan",
+    name="Morning Swing Scan",
+    misfire_grace_time=60,   # ignore old triggers
+    coalesce=True,           # prevent duplicate runs
+    max_instances=1          # avoid overlap
+)
 
     # ── 8:30 AM — Swing scan ──
     scheduler.add_job(
