@@ -207,7 +207,7 @@ def create_scheduler():
     scheduler.add_job(
         job_health_check,
         # CronTrigger(hour=8, minute=0, day_of_week="mon-fri"),
-        CronTrigger(hour=23, minute=59),
+        CronTrigger(hour=0, minute=10),
         id="health_check",
         name="Daily Health Check"
     )
