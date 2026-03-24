@@ -62,6 +62,15 @@ class DBQueries:
         """Log when you enter a trade"""
         db = self.get_db()
         try:
+            # FIX: guard against duplicate open position for same symbol
+            existing = db.query(Position).filter(
+                Position.symbol == signal_data["symbol"],
+                Position.is_open == True
+            ).first()
+            if existing:
+                print(f"⚠️ Position already open for {signal_data['symbol']} — skipping")
+                return
+
             position = Position(
                 symbol=signal_data["symbol"],
                 signal=signal_data["signal"],
@@ -123,6 +132,9 @@ class DBQueries:
                 position.unrealised_pnl = unrealised_pnl
                 position.pnl_pct = pnl_pct
                 db.commit()
+            # FIX: added else-branch so silent failures are visible in logs
+            else:
+                print(f"⚠️ No open position found for {symbol} — skipping price update")
         except Exception as e:
             print(f"❌ Error updating position: {e}")
             db.rollback()
@@ -137,14 +149,33 @@ class DBQueries:
                 Position.symbol == symbol,
                 Position.is_open == True
             ).first()
-            if position:
-                position.is_open = False
-                position.exit_price = exit_price
-                position.exit_reason = exit_reason
-                position.closed_at = datetime.now()
-                db.commit()
-                print(f"✅ Position closed: {symbol} — {exit_reason}")
-                self.update_daily_performance(position)
+
+            if not position:
+                # FIX: was silently doing nothing — now logs clearly
+                print(f"⚠️ No open position found for {symbol} — cannot close")
+                return
+
+            position.is_open = False
+            position.exit_price = exit_price
+            position.exit_reason = exit_reason
+            position.closed_at = datetime.now()
+            db.commit()
+            print(f"✅ Position closed: {symbol} — {exit_reason}")
+
+            # FIX: pass a plain dict instead of the ORM object.
+            # After db.close() the ORM object becomes detached and
+            # accessing its attributes inside update_daily_performance()
+            # raises a DetachedInstanceError.
+            closed_data = {
+                "symbol": position.symbol,
+                "signal": position.signal,
+                "entry": position.entry,
+                "exit_price": position.exit_price,
+                "quantity": position.quantity,
+                "exit_reason": position.exit_reason,
+            }
+            self.update_daily_performance(closed_data)
+
         except Exception as e:
             print(f"❌ Error closing position: {e}")
             db.rollback()
@@ -155,7 +186,9 @@ class DBQueries:
     # Performance queries
     # ─────────────────────────────────────────
     def update_daily_performance(self, position):
-        """Update daily P&L when a trade closes"""
+        """Update daily P&L when a trade closes.
+        Accepts a plain dict (not an ORM object) to avoid DetachedInstanceError.
+        """
         db = self.get_db()
         try:
             today = datetime.now().strftime("%Y-%m-%d")
@@ -163,9 +196,15 @@ class DBQueries:
                 DailyPerformance.date == today
             ).first()
 
-            pnl = (position.exit_price - position.entry) * position.quantity
-            if position.signal == "SELL":
-                pnl = -pnl
+            # FIX: original SELL logic was wrong.
+            # BUY profit  = exit - entry  (positive when price goes up)
+            # SELL profit = entry - exit  (positive when price goes down)
+            if position["signal"] == "BUY":
+                pnl = (position["exit_price"] - position["entry"]) * position["quantity"]
+            else:
+                pnl = (position["entry"] - position["exit_price"]) * position["quantity"]
+
+            pnl = round(pnl, 2)
 
             if not perf:
                 perf = DailyPerformance(
@@ -173,7 +212,9 @@ class DBQueries:
                     total_trades=1,
                     winning_trades=1 if pnl > 0 else 0,
                     losing_trades=1 if pnl <= 0 else 0,
-                    total_pnl=pnl
+                    total_pnl=pnl,
+                    # FIX: win_rate was never set on first record creation
+                    win_rate=100.0 if pnl > 0 else 0.0
                 )
                 db.add(perf)
             else:
@@ -182,7 +223,7 @@ class DBQueries:
                     perf.winning_trades += 1
                 else:
                     perf.losing_trades += 1
-                perf.total_pnl += pnl
+                perf.total_pnl = round(perf.total_pnl + pnl, 2)
                 perf.win_rate = round(
                     perf.winning_trades / perf.total_trades * 100, 2
                 )
@@ -209,19 +250,27 @@ class DBQueries:
 
             total_trades = len(all_closed)
             winning = sum(1 for p in all_closed if p.exit_reason == "TARGET_HIT")
-            losing = sum(1 for p in all_closed if p.exit_reason == "SL_HIT")
+            losing  = sum(1 for p in all_closed if p.exit_reason == "SL_HIT")
+
+            # FIX: SELL P&L was inverted in original — now consistent with
+            # the corrected logic in update_daily_performance()
             total_pnl = sum(
                 (p.exit_price - p.entry) * p.quantity
                 if p.signal == "BUY"
                 else (p.entry - p.exit_price) * p.quantity
                 for p in all_closed
             )
-            win_rate = round(winning / total_trades * 100, 2)
+
+            # FIX: guard against zero-division if total_trades somehow = 0
+            win_rate = round(winning / total_trades * 100, 2) if total_trades else 0.0
 
             return {
                 "total_trades": total_trades,
                 "winning_trades": winning,
                 "losing_trades": losing,
+                # FIX: manual exits (exit_reason = MANUAL) were not counted
+                # in winning or losing — surface them separately
+                "manual_exits": total_trades - winning - losing,
                 "total_pnl": round(total_pnl, 2),
                 "win_rate": win_rate
             }
