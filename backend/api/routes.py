@@ -11,28 +11,12 @@ from database.models import create_tables
 # ─────────────────────────────────────────
 # Lifespan
 # ─────────────────────────────────────────
-from scheduler.jobs import create_scheduler
-
-scheduler = None
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global scheduler
-
     create_tables()
     print("✅ Trading Tool API started")
-
-    # START scheduler here
-    scheduler = create_scheduler()
-    scheduler.start()
-    print("✅ Scheduler started inside FastAPI")
-
     yield
 
-    # STOP scheduler on shutdown
-    if scheduler and scheduler.running:
-        scheduler.shutdown(wait=False)
-        print("⏱ Scheduler stopped")
 
 app = FastAPI(
     title="Trading Tool API",
