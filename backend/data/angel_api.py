@@ -23,11 +23,36 @@ class AngelOneAPI:
                 ANGEL_PASSWORD,
                 totp
             )
+            
+            # FIX: validate session actually succeeded
+            if not self.session or not self.session.get("status"):
+                print(f"❌ Angel One session generation failed: {self.session}")
+                self.api = None
+                self.session = None
+                return False
+            
             print("✅ Angel One login successful")
             return True
         except Exception as e:
             print(f"❌ Angel One login failed: {e}")
+            self.api = None
+            self.session = None
             return False
+
+    def is_session_alive(self):
+        """Check if session is valid before API call"""
+        # FIX: guard against None api or session
+        if not self.api or not self.session:
+            return False
+        return True
+
+    def ensure_logged_in(self):
+        """Auto re-login if session is dead"""
+        # FIX: if session died, re-login automatically
+        if not self.is_session_alive():
+            print("⚠️ Session dead — re-logging in...")
+            return self.login()
+        return True
 
     def get_historical_data(self, symbol, interval="ONE_DAY", days=100):
         """
@@ -36,6 +61,10 @@ class AngelOneAPI:
         → ONE_DAY (daily candles — for swing)
         → FIVE_MINUTE (5 min candles — for intraday)
         """
+        # FIX: auto re-login before API call
+        if not self.ensure_logged_in():
+            return None
+
         try:
             from datetime import datetime, timedelta
             end_date = datetime.now()
@@ -74,6 +103,10 @@ class AngelOneAPI:
 
     def get_live_price(self, symbol):
         """Get current live price of a symbol"""
+        # FIX: auto re-login before API call
+        if not self.ensure_logged_in():
+            return None
+
         try:
             token = self.get_token(symbol)
             if not token:
@@ -114,15 +147,18 @@ class AngelOneAPI:
 
     def logout(self):
         try:
-            self.api.terminateSession(ANGEL_CLIENT_ID)
+            if self.api:
+                self.api.terminateSession(ANGEL_CLIENT_ID)
             print("✅ Angel One logout successful")
         except Exception as e:
             print(f"❌ Logout error: {e}")
+        finally:
+            self.api = None
+            self.session = None
 
 
 # Single instance to reuse across the app
 angel = AngelOneAPI()
-
 
 
 if __name__ == "__main__":
