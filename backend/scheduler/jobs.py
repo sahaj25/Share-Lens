@@ -224,7 +224,7 @@ def create_scheduler():
     # ── 9:00 AM IST — Intraday scanner reset ──
     scheduler.add_job(
         job_intraday_reset,
-        CronTrigger(hour=9, minute=0, day_of_week="mon-fri"),
+        CronTrigger(minute="*")),
         id="intraday_reset",
         name="Intraday Reset"
     )
