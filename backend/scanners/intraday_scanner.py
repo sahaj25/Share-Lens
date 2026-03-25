@@ -9,13 +9,13 @@ class IntradayScanner:
 
     def __init__(self):
         self.alerted_today = set()  # Track already alerted stocks today
-        self.daily_loss = 0         # Track daily loss
+        self.daily_loss = 0  # Track daily loss
         self.daily_loss_limit = 1000
 
     def scan_all(self):
         """
-        Main function — scans all Nifty 50 stocks.
-        Runs every 5 minutes between 9:15 AM - 11:00 AM.
+        Main function — scans all Nifty 50 stocks
+        Runs every 5 minutes between 9:15 AM - 11:00 AM
         """
         # Check daily loss limit
         if self.daily_loss >= self.daily_loss_limit:
@@ -49,22 +49,18 @@ class IntradayScanner:
                 print(f"⚠️ {symbol} — Error: {e}")
                 continue
 
-        # Sort by score (highest first)
+        # Sort by score
         opportunities.sort(key=lambda x: x["score"], reverse=True)
         return opportunities
 
     def analyze_stock(self, symbol):
         """
-        Analyze a single stock for intraday setup.
-        Uses 5-minute candles.
+        Analyze a single stock for intraday setup
+        Uses 5-minute candles
         """
-        # FIX: use days=3 instead of days=2
-        # Reason: on Mondays or post-holidays, days=2 may only yield 1 trading
-        # day of data (~75 candles), which is too few for reliable indicators.
-        # days=3 guarantees at least 2 full trading days (~150 candles) even
-        # after a long weekend or market holiday.
+        # Fetch 5 minute candle data
         df = angel.get_historical_data(
-            symbol, interval="FIVE_MINUTE", days=3
+            symbol, interval="FIVE_MINUTE", days=2
         )
         if df is None or len(df) < 20:
             return None
@@ -79,12 +75,10 @@ class IntradayScanner:
 
         latest = df.iloc[-1]
 
-        # Calculate score (returns value on 1–10 scale)
+        # Calculate score
         score = self.calculate_score(df, signal)
 
-        # FIX: MIN_SCORE_TO_ALERT must be on a 1–10 scale in config.py
-        # e.g. MIN_SCORE_TO_ALERT = 7.0  ← correct
-        #      MIN_SCORE_TO_ALERT = 70   ← WRONG, will reject all signals
+        # Reject below threshold
         if score < MIN_SCORE_TO_ALERT:
             return None
 
@@ -121,15 +115,8 @@ class IntradayScanner:
 
     def calculate_score(self, df, signal):
         """
-        Score intraday setup on a 1–10 scale.
-
-        Breakdown (out of 100 internally, divided by 10):
-          VWAP alignment  → 35 pts
-          EMA-9 alignment → 30 pts
-          Volume spike    → 35 pts
-
-        ⚠️  Config note: MIN_SCORE_TO_ALERT in config.py must be 1–10
-            e.g.  MIN_SCORE_TO_ALERT = 7.0
+        Score intraday setup out of 10
+        VWAP + EMA9 + Volume = 3 core conditions
         """
         score = 0
         latest = df.iloc[-1]
@@ -141,7 +128,7 @@ class IntradayScanner:
         elif signal == "SELL" and price < latest["vwap"]:
             score += 35
 
-        # EMA-9 check — 30 points
+        # EMA 9 check — 30 points
         if signal == "BUY" and price > latest["ema_9"]:
             score += 30
         elif signal == "SELL" and price < latest["ema_9"]:
@@ -151,13 +138,13 @@ class IntradayScanner:
         if latest["volume_spike"]:
             score += 35
 
-        # Convert to 1–10 scale
+        # Convert to 1-10 scale
         return round(score / 10, 1)
 
     def reset_daily(self):
         """
-        Reset daily tracking.
-        Called every morning at 9:00 AM by scheduler.
+        Reset daily tracking
+        Called every morning at 9:00 AM by scheduler
         """
         self.alerted_today = set()
         self.daily_loss = 0
@@ -165,8 +152,8 @@ class IntradayScanner:
 
     def update_daily_loss(self, loss_amount):
         """
-        Update daily loss tracker.
-        Called when a trade hits stop loss.
+        Update daily loss tracker
+        Called when a trade hits stop loss
         """
         self.daily_loss += loss_amount
         print(f"📉 Daily loss updated: ₹{self.daily_loss}")

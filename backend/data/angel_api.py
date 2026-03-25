@@ -13,7 +13,6 @@ class AngelOneAPI:
     def __init__(self):
         self.api = None
         self.session = None
-        self._jwt_token = None  # FIX: store JWT separately for expiry check
 
     def login(self):
         try:
@@ -24,79 +23,19 @@ class AngelOneAPI:
                 ANGEL_PASSWORD,
                 totp
             )
-
-            # Validate session actually succeeded
-            if not self.session or not self.session.get("status"):
-                print(f"❌ Angel One session generation failed: {self.session}")
-                self.api = None
-                self.session = None
-                self._jwt_token = None
-                return False
-
-            # FIX: extract and store JWT token to validate expiry later
-            self._jwt_token = (
-                self.session.get("data", {}).get("jwtToken")
-            )
-            if not self._jwt_token:
-                print("❌ JWT token missing in session response")
-                self.api = None
-                self.session = None
-                return False
-
             print("✅ Angel One login successful")
             return True
-
         except Exception as e:
             print(f"❌ Angel One login failed: {e}")
-            self.api = None
-            self.session = None
-            self._jwt_token = None
             return False
-
-    def is_session_alive(self):
-        """
-        FIX: Properly check session validity.
-        - Checks api and session objects exist
-        - Checks JWT token is present (not just the session dict)
-        - Attempts a lightweight API call to confirm token is still valid
-        """
-        if not self.api or not self.session:
-            return False
-
-        # FIX: check JWT token actually exists
-        if not self._jwt_token:
-            return False
-
-        # FIX: do a lightweight live check to confirm token hasn't expired
-        try:
-            profile = self.api.getProfile(
-                self.session.get("data", {}).get("refreshToken", "")
-            )
-            if profile and profile.get("status"):
-                return True
-            return False
-        except Exception:
-            # Any error here means session is dead
-            return False
-
-    def ensure_logged_in(self):
-        """Auto re-login if session is dead"""
-        if not self.is_session_alive():
-            print("⚠️ Session dead or expired — re-logging in...")
-            return self.login()
-        return True
 
     def get_historical_data(self, symbol, interval="ONE_DAY", days=100):
         """
-        Fetch historical OHLCV data for a symbol.
-
+        Fetch historical OHLCV data for a symbol
         interval options:
-        → ONE_DAY       (daily candles — for swing)
-        → FIVE_MINUTE   (5-min candles — for intraday)
+        → ONE_DAY (daily candles — for swing)
+        → FIVE_MINUTE (5 min candles — for intraday)
         """
-        if not self.ensure_logged_in():
-            return None
-
         try:
             from datetime import datetime, timedelta
             end_date = datetime.now()
@@ -104,7 +43,6 @@ class AngelOneAPI:
 
             token = self.get_token(symbol)
             if not token:
-                print(f"❌ Token not found for symbol: {symbol}")
                 return None
 
             params = {
@@ -127,7 +65,7 @@ class AngelOneAPI:
                 df = df.astype(float)
                 return df
             else:
-                print(f"❌ No data returned for {symbol}")
+                print(f"❌ No data for {symbol}")
                 return None
 
         except Exception as e:
@@ -136,9 +74,6 @@ class AngelOneAPI:
 
     def get_live_price(self, symbol):
         """Get current live price of a symbol"""
-        if not self.ensure_logged_in():
-            return None
-
         try:
             token = self.get_token(symbol)
             if not token:
@@ -155,6 +90,7 @@ class AngelOneAPI:
 
     def get_token(self, symbol):
         """Get Angel One token for a symbol"""
+        # Token map for Nifty 50 stocks
         token_map = {
             "RELIANCE": "2885", "TCS": "11536", "HDFCBANK": "1333",
             "INFY": "1594", "ICICIBANK": "4963", "HINDUNILVR": "1394",
@@ -178,19 +114,15 @@ class AngelOneAPI:
 
     def logout(self):
         try:
-            if self.api:
-                self.api.terminateSession(ANGEL_CLIENT_ID)
+            self.api.terminateSession(ANGEL_CLIENT_ID)
             print("✅ Angel One logout successful")
         except Exception as e:
             print(f"❌ Logout error: {e}")
-        finally:
-            self.api = None
-            self.session = None
-            self._jwt_token = None  # FIX: clear JWT on logout
 
 
 # Single instance to reuse across the app
 angel = AngelOneAPI()
+
 
 
 if __name__ == "__main__":

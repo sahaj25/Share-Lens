@@ -93,13 +93,7 @@ def job_swing_scan():
 
 
 def job_intraday_scan():
-    """
-    Every 5 mins — 9:15 AM to 11:00 AM.
-
-    FIX: Cron trigger now starts at 9:15 (not 9:00), so no wasted
-    trigger fires at 9:00, 9:05, 9:10 that the time-gate had to
-    silently discard.
-    """
+    """Every 5 mins 9:15 AM – 11:00 AM"""
     from scanners.intraday_scanner import intraday_scanner
     from ai.gemini_agent import gemini_agent
     from alerts.telegram_bot import telegram_bot
@@ -108,7 +102,7 @@ def job_intraday_scan():
     if not should_run():
         return
 
-    # Safety time-gate — belt-and-suspenders guard
+    # Extra time-gate so stray triggers outside window are ignored
     now   = datetime.now().time()
     start = datetime.strptime("09:15", "%H:%M").time()
     end   = datetime.strptime("11:00", "%H:%M").time()
@@ -183,6 +177,11 @@ def job_intraday_reset():
     print("🔄 Intraday scanner reset")
 
 
+# ──────────────────────────────────────────────────────────────
+# ✅ ADDED HERE — Keep-alive job (prevents Render from sleeping)
+# Placed ABOVE create_scheduler() so the function exists
+# before it is referenced inside scheduler.add_job()
+# ──────────────────────────────────────────────────────────────
 def job_keep_alive():
     """Pings own /health endpoint every 10 mins to prevent Render sleep"""
     import requests
@@ -229,39 +228,15 @@ def create_scheduler():
     )
 
     # ── 9:15 AM – 11:00 AM — Intraday scan every 5 mins ──
-    # FIX: cron now starts at minute=15 for the 9 o'clock hour,
-    # eliminating wasted triggers at 9:00, 9:05, 9:10.
-    # The "10" hour fires at :00,:05,...,:55 — all within 10:00–10:55 ✅
-    # The "11" hour fires only at 11:00 (the last allowed slot) ✅
     scheduler.add_job(
         job_intraday_scan,
         CronTrigger(
-            hour="9",
-            minute="15,20,25,30,35,40,45,50,55",
-            day_of_week="mon-fri"
-        ),
-        id="intraday_scan_9",
-        name="Intraday Scanner 9:15–9:55"
-    )
-    scheduler.add_job(
-        job_intraday_scan,
-        CronTrigger(
-            hour="10",
+            hour="9,10,11",
             minute="0,5,10,15,20,25,30,35,40,45,50,55",
             day_of_week="mon-fri"
         ),
-        id="intraday_scan_10",
-        name="Intraday Scanner 10:00–10:55"
-    )
-    scheduler.add_job(
-        job_intraday_scan,
-        CronTrigger(
-            hour="11",
-            minute="0",
-            day_of_week="mon-fri"
-        ),
-        id="intraday_scan_11",
-        name="Intraday Scanner 11:00"
+        id="intraday_scan",
+        name="Intraday Scanner (9:15–11:00)"
     )
 
     # ── 9:15 AM – 3:30 PM — Position monitor every 1 min ──
@@ -284,7 +259,8 @@ def create_scheduler():
         name="EOD Summary"
     )
 
-    # ── Every 10 mins, all day — Render keep-alive ──
+    # ── Every 10 mins, all day — Render keep-alive ──  ✅ ADDED HERE
+    # Must be the last job added — runs 24/7 regardless of market hours
     scheduler.add_job(
         job_keep_alive,
         CronTrigger(minute="*/10"),
