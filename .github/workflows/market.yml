@@ -13,6 +13,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Set timezone to IST
+        run: |
+          sudo timedatectl set-timezone Asia/Kolkata
+          date
       - name: Checkout code
         uses: actions/checkout@v3
 
