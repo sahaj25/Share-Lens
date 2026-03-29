@@ -19,7 +19,7 @@ jobs:
       - name: Debug TOTP secret length
         run: |
           echo "TOTP token length: ${#ANGEL_TOTP_TOKEN}"
-          echo "First 4 chars: ${ANGEL_TOTP_TOKEN}"
+          echo "First 4 chars: ${ANGEL_TOTP_TOKEN:0:4}"
         env:
           ANGEL_TOTP_TOKEN: ${{ secrets.ANGEL_TOTP_TOKEN }}
 
