@@ -7,10 +7,13 @@ from datetime import datetime
 import requests as req
 
 
-API_KEY = os.getenv("ANGEL_API_KEY")
-CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
-PASSWORD = os.getenv("ANGEL_PASSWORD")
-TOTP_TOKEN = os.getenv("ANGEL_TOTP_TOKEN")
+API_KEY    = os.getenv("ANGEL_API_KEY", "9JISPNHk")
+
+CLIENT_ID  = os.getenv("ANGEL_CLIENT_ID", "AACF720261")
+
+PASSWORD   = os.getenv("ANGEL_PASSWORD", "9899")
+
+TOTP_TOKEN = os.getenv("ANGEL_TOTP_TOKEN", "V4NFSKT63GKGOHJXKIDUFK3URI")
 
 # ── Symbols to track ──────────────────────────────────────────────────────────
 
