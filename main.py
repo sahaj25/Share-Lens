@@ -46,14 +46,37 @@ SYMBOL_TOKEN_MAP = {
 def login() -> SmartConnect:
     obj = SmartConnect(api_key=API_KEY)
 
-    totp = pyotp.TOTP(TOTP_TOKEN).now()
+    totp_gen = pyotp.TOTP(TOTP_TOKEN)
 
-    data = obj.generateSession(CLIENT_ID, PASSWORD, totp)
+    last_error = None
 
-    if data["status"] is False:
-        raise RuntimeError(f"Login failed: {data['message']}")
+    for attempt in range(3):  # retry 3 times
+        try:
+            current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            totp = totp_gen.now()
 
-    return obj
+            print(f"[LOGIN ATTEMPT {attempt+1}] UTC Time: {current_time}")
+            print(f"[LOGIN ATTEMPT {attempt+1}] Generated TOTP: {totp}")
+
+            data = obj.generateSession(CLIENT_ID, PASSWORD, totp)
+
+            if data.get("status"):
+                print("✅ Login successful")
+                return obj
+
+            else:
+                last_error = data.get("message")
+                print(f"❌ Login failed: {last_error}")
+
+        except Exception as e:
+            last_error = str(e)
+            print(f"❌ Exception during login: {e}")
+
+        # Wait for next TOTP window
+        print("⏳ Waiting for next TOTP window...")
+        time.sleep(12)
+
+    raise RuntimeError(f"Login failed after retries: {last_error}")
 
 
 def get_token(symbol: str) -> str:

@@ -3,7 +3,7 @@ name: Market Snapshot Bot
 on:
   schedule:
     # ⏰ Times in UTC (IMPORTANT)
-    - cron: "35 19 * * *"   # 01:05 IST
+    - cron: "25 8 * * *"   # 13:55 IST
     - cron: "30 7 * * *"    # 13:00 IST
     - cron: "0 10 * * *"    # 15:30 IST
   workflow_dispatch:
