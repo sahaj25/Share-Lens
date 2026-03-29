@@ -3,7 +3,7 @@ name: Market Snapshot Bot
 on:
   schedule:
     # ⏰ All times in UTC — IST is UTC+5:30
-    - cron: "25 8 * * 1-5"    # 14:55 IST — weekdays only
+    - cron: "15 18 * * *"   # 23:45 IST (Mon–Sun)
     - cron: "30 7 * * 1-5"    # 13:00 IST — weekdays only
     - cron: "0 10 * * 1-5"    # 15:30 IST — weekdays only
   workflow_dispatch:           # manual trigger for testing
