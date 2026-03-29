@@ -10,7 +10,7 @@ import ntplib
 API_KEY       = os.getenv("ANGEL_API_KEY")
 CLIENT_ID     = os.getenv("ANGEL_CLIENT_ID")
 PASSWORD      = os.getenv("ANGEL_PASSWORD")
-TOTP_TOKEN    = os.getenv("ANGEL_TOTP_TOKEN")
+TOTP_TOKEN    = os.getenv("ANGEL_TOTP_SECRET")
 
 # ── Symbols to track ──────────────────────────────────────────────────────────
 
