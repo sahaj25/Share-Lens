@@ -2,11 +2,11 @@ name: Market Snapshot Bot
 
 on:
   schedule:
-    # ⏰ Times in UTC (IST = UTC + 5:30)
-    - cron: "45 20 * * 0-4"   # 02:15 IST (Mon–Fri)
-    - cron: "30 7 * * 1-5"   # 13:00 IST  — Mon to Fri only
-    - cron: "0 10 * * 1-5"   # 15:30 IST  — Mon to Fri only
-  workflow_dispatch:          # allow manual trigger anytime
+    # ⏰ All times in UTC — IST is UTC+5:30
+    - cron: "25 8 * * 1-5"    # 13:55 IST — weekdays only
+    - cron: "30 7 * * 1-5"    # 13:00 IST — weekdays only
+    - cron: "0 10 * * 1-5"    # 15:30 IST — weekdays only
+  workflow_dispatch:           # manual trigger for testing
 
 jobs:
   run-bot:
@@ -16,18 +16,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Sync system clock (fixes TOTP drift on GitHub runners)
+      # ✅ KEY FIX: sync runner clock via chronyc (reliable on Ubuntu 22.04+)
+      # GitHub Actions runners can have clock drift which breaks TOTP validation.
+      # chronyc is pre-installed and more reliable than ntpdate on modern Ubuntu.
+      - name: Sync system clock (fix TOTP clock drift)
         run: |
-          sudo apt-get install -y ntpdate
-          sudo ntpdate -u pool.ntp.org
-          echo "✅ Clock synced. Current time:"
-          date
+          echo "⏱ Before sync:"
+          date -u
+          sudo chronyc makestep || sudo chronyc -a makestep || echo "chronyc unavailable, continuing"
+          echo "⏱ After sync:"
+          date -u
 
       - name: Set timezone to IST
         run: |
           sudo timedatectl set-timezone Asia/Kolkata
-          echo "✅ Timezone set. Current IST time:"
-          date
+          echo "🕐 Current IST time: $(date)"
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -40,9 +43,9 @@ jobs:
       - name: Run script
         run: python main.py
         env:
-          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
-          ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
-          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
-          ANGEL_TOTP_TOKEN: ${{ secrets.ANGEL_TOTP_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANGEL_API_KEY:        ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:      ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:       ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_TOKEN:     ${{ secrets.ANGEL_TOTP_TOKEN }}
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
