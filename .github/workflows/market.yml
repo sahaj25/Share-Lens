@@ -16,13 +16,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Debug TOTP secret length
-        run: |
-          echo "TOTP token length: ${#ANGEL_TOTP_SECRET}"
-          echo "First 4 chars: ${ANGEL_TOTP_SECRET:0:4}"
-        env:
-          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
-
       # ✅ KEY FIX: sync runner clock via chronyc (reliable on Ubuntu 22.04+)
       # GitHub Actions runners can have clock drift which breaks TOTP validation.
       # chronyc is pre-installed and more reliable than ntpdate on modern Ubuntu.
