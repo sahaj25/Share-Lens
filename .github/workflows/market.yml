@@ -2,23 +2,32 @@ name: Market Snapshot Bot
 
 on:
   schedule:
-    # ⏰ Times in UTC (IMPORTANT)
-    - cron: "25 8 * * *"   # 13:55 IST
-    - cron: "30 7 * * *"    # 13:00 IST
-    - cron: "0 10 * * *"    # 15:30 IST
-  workflow_dispatch:
+    # ⏰ Times in UTC (IST = UTC + 5:30)
+    - cron: "45 20 * * 0-4"   # 02:15 IST (Mon–Fri)
+    - cron: "30 7 * * 1-5"   # 13:00 IST  — Mon to Fri only
+    - cron: "0 10 * * 1-5"   # 15:30 IST  — Mon to Fri only
+  workflow_dispatch:          # allow manual trigger anytime
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Sync system clock (fixes TOTP drift on GitHub runners)
+        run: |
+          sudo apt-get install -y ntpdate
+          sudo ntpdate -u pool.ntp.org
+          echo "✅ Clock synced. Current time:"
+          date
+
       - name: Set timezone to IST
         run: |
           sudo timedatectl set-timezone Asia/Kolkata
+          echo "✅ Timezone set. Current IST time:"
           date
-      - name: Checkout code
-        uses: actions/checkout@v3
 
       - name: Setup Python
         uses: actions/setup-python@v4
