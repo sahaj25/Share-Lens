@@ -21,7 +21,7 @@ jobs:
           echo "TOTP token length: ${#ANGEL_TOTP_SECRET}"
           echo "First 4 chars: ${ANGEL_TOTP_SECRET:0:4}"
         env:
-          ANGEL_TOTP_TOKEN: ${{ secrets.ANGEL_TOTP_SECRET }}
+          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
 
       # ✅ KEY FIX: sync runner clock via chronyc (reliable on Ubuntu 22.04+)
       # GitHub Actions runners can have clock drift which breaks TOTP validation.
@@ -53,6 +53,6 @@ jobs:
           ANGEL_API_KEY:        ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID:      ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD:       ${{ secrets.ANGEL_PASSWORD }}
-          ANGEL_TOTP_TOKEN:     ${{ secrets.ANGEL_TOTP_TOKEN }}
+          ANGEL_TOTP_SECRET:     ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
