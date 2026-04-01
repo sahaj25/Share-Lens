@@ -1,202 +1,209 @@
+import sys
+sys.path.append(".")
+from data.angel_api import fetch_all_stocks
+from indicators.technical import calculate_indicators, get_latest
 import pandas as pd
-from data.angel_api import angel
-from indicators.technical import indicators
-from config import NIFTY_50_SYMBOLS, MIN_SCORE_TO_ALERT, MIN_RISK_REWARD
+import numpy as np
 
 
-class SwingScanner:
+def find_support_resistance(df, window=10):
+    """Find key S/R levels from recent price history"""
+    highs = df["high"].rolling(window=window, center=True).max()
+    lows = df["low"].rolling(window=window, center=True).min()
 
-    def scan_all(self):
-        """
-        Main function — scans all Nifty 50 stocks
-        Returns list of valid swing opportunities
-        """
-        print("🔍 Starting Swing Scanner...")
-        opportunities = []
+    resistance_levels = df["high"][df["high"] == highs].values
+    support_levels = df["low"][df["low"] == lows].values
 
-        for symbol in NIFTY_50_SYMBOLS:
-            try:
-                result = self.analyze_stock(symbol)
-                if result:
-                    opportunities.append(result)
-                    print(f"✅ {symbol} — Score: {result['score']}/10")
-                else:
-                    print(f"❌ {symbol} — No setup")
-            except Exception as e:
-                print(f"⚠️ {symbol} — Error: {e}")
-                continue
+    resistance_levels = sorted(set(resistance_levels.round(1)), reverse=True)
+    support_levels = sorted(set(support_levels.round(1)), reverse=True)
 
-        # Sort by score — highest first
-        opportunities.sort(key=lambda x: x["score"], reverse=True)
+    return support_levels, resistance_levels
 
-        print(f"\n📊 Scan complete — {len(opportunities)} setups found")
-        return opportunities
 
-    def analyze_stock(self, symbol):
-        """
-        Analyze a single stock for swing setup
-        Returns opportunity dict if valid, None if not
-        """
-        # Fetch daily candle data
-        df = angel.get_historical_data(symbol, interval="ONE_DAY", days=100)
-        if df is None or len(df) < 50:
-            return None
+def check_sr_quality(current_price, support_levels, resistance_levels):
+    """
+    Check where price is relative to S/R levels
+    Returns: (score, label)
+    """
+    proximity_pct = 0.02  # within 2%
 
-        # Add all indicators
-        df = indicators.add_all_indicators(df)
+    # Check if near support
+    for sup in support_levels[:5]:
+        if abs(current_price - sup) / current_price <= proximity_pct:
+            return 20, "at key support"
 
-        # Run all checks
-        trend = indicators.check_swing_trend(df)
-        trend_strong = indicators.check_trend_strength(df)
-        rsi_zone = indicators.check_rsi_zone(df)
-        volume_confirmed = indicators.check_volume_confirmation(df)
+    # Check if breakout above resistance
+    for res in resistance_levels[:5]:
+        if current_price > res and abs(current_price - res) / current_price <= proximity_pct:
+            return 20, "breaking out above resistance"
 
-        latest = df.iloc[-1]
-        near_support = latest["near_support"]
-        near_resistance = latest["near_resistance"]
-        breakout = latest["breakout"]
+    # Check if approaching resistance — avoid
+    for res in resistance_levels[:5]:
+        if abs(current_price - res) / current_price <= proximity_pct and current_price < res:
+            return 0, "near resistance — avoid"
 
-        # Determine signal direction
-        if trend == "BULLISH":
-            signal = "BUY"
-        elif trend == "BEARISH":
-            signal = "SELL"
+    # Price is in middle — neutral
+    return 10, "no key level nearby"
+
+
+def calculate_rr(entry, sl, target):
+    """Calculate Risk/Reward ratio"""
+    risk = abs(entry - sl)
+    reward = abs(target - entry)
+    if risk == 0:
+        return 0
+    return reward / risk
+
+
+def calculate_sl_target(df, latest, trend):
+    """Auto calculate entry, SL and target"""
+    current_price = latest["close"]
+    atr = (df["high"] - df["low"]).rolling(14).mean().iloc[-1]
+
+    entry = current_price
+
+    if trend == "bullish":
+        sl = round(entry - (1.5 * atr), 1)
+        target = round(entry + (3 * atr), 1)
+    else:
+        sl = round(entry + (1.5 * atr), 1)
+        target = round(entry - (3 * atr), 1)
+
+    rr = calculate_rr(entry, sl, target)
+    return entry, sl, target, rr
+
+
+def scan_stock(symbol, df):
+    """
+    Run all 6 steps on a single stock.
+    Returns signal dict if passes, None if rejected.
+    """
+    processed = calculate_indicators(df)
+    if processed is None or len(processed) < 5:
+        return None
+
+    latest = get_latest(processed)
+    score = 0
+    reasons = []
+
+    # --- Step 1: Trend Check ---
+    if latest["ema20"] > latest["ema50"]:
+        trend = "bullish"
+        score += 20
+        reasons.append("EMA20 > EMA50 (bullish trend)")
+    elif latest["ema20"] < latest["ema50"]:
+        trend = "bearish"
+        # For now we only take bullish setups
+        return None
+    else:
+        return None  # No clear trend
+
+    # --- Step 2: ADX Strength ---
+    if latest["adx"] >= 25:
+        score += 20
+        reasons.append(f"ADX {latest['adx']:.1f} (strong trend)")
+    else:
+        return None  # Weak trend, reject
+
+    # --- Step 3: RSI Entry Timing ---
+    rsi = latest["rsi"]
+    if 40 <= rsi <= 60:
+        score += 20
+        reasons.append(f"RSI {rsi:.1f} (good entry zone)")
+    elif rsi < 40:
+        score += 20
+        reasons.append(f"RSI {rsi:.1f} (oversold bounce opportunity)")
+    elif rsi > 70:
+        return None  # Overbought, reject
+    else:
+        score += 10  # RSI 60-70, partial score
+
+    # --- Step 4: Volume Confirmation ---
+    if latest["vol_ratio"] >= 1.0:
+        score += 20
+        reasons.append(f"Volume {latest['vol_ratio']:.1f}x average")
+    else:
+        return None  # Below average volume, reject
+
+    # --- Step 5: S/R Check ---
+    support_levels, resistance_levels = find_support_resistance(processed)
+    sr_score, sr_label = check_sr_quality(latest["close"], support_levels, resistance_levels)
+
+    if sr_score == 0:
+        return None  # Near resistance, reject
+
+    score += sr_score
+    reasons.append(sr_label)
+
+    # --- Step 6: R/R Calculation ---
+    entry, sl, target, rr = calculate_sl_target(processed, latest, trend)
+
+    if rr < 1.5:
+        return None  # Below 1:1.5 R/R, reject
+
+    # --- Final Score ---
+    final_score = round((score / 100) * 10, 1)
+
+    if final_score < 7.0:
+        return None  # Below threshold
+
+    sl_pct = round(abs(entry - sl) / entry * 100, 1)
+    target_pct = round(abs(target - entry) / entry * 100, 1)
+
+    return {
+        "symbol": symbol,
+        "score": final_score,
+        "entry": round(entry, 1),
+        "sl": round(sl, 1),
+        "target": round(target, 1),
+        "sl_pct": sl_pct,
+        "target_pct": target_pct,
+        "rr": round(rr, 2),
+        "rsi": round(rsi, 1),
+        "adx": round(latest["adx"], 1),
+        "vol_ratio": round(latest["vol_ratio"], 2),
+        "trend": trend,
+        "reasons": reasons,
+        "close": latest["close"],
+    }
+
+
+def run_swing_scan():
+    """Main function — scan all stocks and return valid setups"""
+    print("Fetching data...")
+    all_data = fetch_all_stocks()
+
+    if not all_data:
+        print("Failed to fetch data")
+        return []
+
+    print(f"\nScanning {len(all_data)} stocks...")
+    signals = []
+
+    for symbol, df in all_data.items():
+        result = scan_stock(symbol, df)
+        if result:
+            signals.append(result)
+            print(f"  ✅ {symbol} — Score {result['score']}/10 | Entry {result['entry']} | SL {result['sl']} | Target {result['target']} | R/R 1:{result['rr']}")
         else:
-            return None  # No clear trend = skip
+            print(f"  ✗ {symbol} — rejected")
 
-        # Reject if price near resistance on a BUY signal
-        if signal == "BUY" and near_resistance and not breakout:
-            return None
+    print(f"\n{'='*50}")
+    print(f"SETUPS FOUND: {len(signals)}")
+    print(f"REJECTED: {len(all_data) - len(signals)}")
 
-        # Calculate score
-        score = self.calculate_score(
-            trend=trend,
-            trend_strong=trend_strong,
-            rsi_zone=rsi_zone,
-            volume_confirmed=volume_confirmed,
-            near_support=near_support,
-            breakout=breakout
-        )
-
-        # Reject if score below threshold
-        if score < MIN_SCORE_TO_ALERT:
-            return None
-
-        # Calculate entry, SL, target
-        trade_levels = indicators.calculate_sl_target(df, signal)
-        if not trade_levels:
-            return None
-
-        # Reject if R/R below minimum
-        if trade_levels["risk_reward"] < MIN_RISK_REWARD:
-            return None
-
-        # Estimate holding days based on ADX strength
-        adx = latest["adx"]
-        if adx >= 35:
-            hold_days = "3-5 days"
-        elif adx >= 25:
-            hold_days = "5-7 days"
-        else:
-            hold_days = "7-10 days"
-
-        return {
-            "symbol": symbol,
-            "signal": signal,
-            "score": score,
-            "entry": trade_levels["entry"],
-            "stop_loss": trade_levels["stop_loss"],
-            "target": trade_levels["target"],
-            "risk_reward": trade_levels["risk_reward"],
-            "hold_days": hold_days,
-            "trend": trend,
-            "rsi": round(latest["rsi"], 2),
-            "adx": round(latest["adx"], 2),
-            "volume_ratio": round(latest["volume_ratio"], 2),
-            "near_support": near_support,
-            "breakout": breakout,
-            "rsi_zone": rsi_zone
-        }
-
-    def calculate_score(
-            self, trend, trend_strong, rsi_zone,
-            volume_confirmed, near_support, breakout
-    ):
-        """
-        Score each stock out of 10
-        Based on weighted conditions
-        """
-        score = 0
-
-        # Trend direction — 20 points
-        if trend in ["BULLISH", "BEARISH"]:
-            score += 20
-
-        # Trend strength (ADX) — 20 points
-        if trend_strong:
-            score += 20
-
-        # RSI zone — 20 points
-        if rsi_zone == "OVERSOLD":
-            score += 20  # Best entry opportunity
-        elif rsi_zone == "GOOD":
-            score += 15  # Good entry
-        elif rsi_zone == "NEUTRAL":
-            score += 5  # Okay entry
-
-        # Volume confirmation — 20 points
-        if volume_confirmed:
-            score += 20
-
-        # Support/Resistance bonus — 20 points
-        if breakout:
-            score += 20  # Breakout = highest conviction
-        elif near_support and trend == "BULLISH":
-            score += 15  # Near support on bullish = good
-        elif near_support:
-            score += 10
-
-        # Convert to 1-10 scale
-        return round(score / 10, 1)
-
-    def get_market_mood(self):
-        """
-        Check how many Nifty 50 stocks are above EMA 20
-        Gives overall market direction
-        """
-        bullish_count = 0
-        total_checked = 0
-
-        for symbol in NIFTY_50_SYMBOLS:
-            try:
-                df = angel.get_historical_data(
-                    symbol, interval="ONE_DAY", days=50
-                )
-                if df is None or len(df) < 20:
-                    continue
-
-                df = indicators.add_ema(df)
-                latest = df.iloc[-1]
-
-                if latest["close"] > latest["ema_20"]:
-                    bullish_count += 1
-                total_checked += 1
-
-            except Exception:
-                continue
-
-        if total_checked == 0:
-            return "UNKNOWN", 0, 0
-
-        if bullish_count >= total_checked * 0.6:
-            mood = "BULLISH 📈"
-        elif bullish_count <= total_checked * 0.4:
-            mood = "BEARISH 📉"
-        else:
-            mood = "NEUTRAL ➡️"
-
-        return mood, bullish_count, total_checked
+    return signals
 
 
-# Single instance
-swing_scanner = SwingScanner()
+if __name__ == "__main__":
+    signals = run_swing_scan()
+
+    if signals:
+        print("\nFINAL SIGNALS:")
+        for s in signals:
+            print(f"\n{s['symbol']} — {s['score']}/10")
+            print(f"  Entry: ₹{s['entry']} | SL: ₹{s['sl']} ({s['sl_pct']}%) | Target: ₹{s['target']} ({s['target_pct']}%)")
+            print(f"  R/R: 1:{s['rr']} | RSI: {s['rsi']} | ADX: {s['adx']} | Vol: {s['vol_ratio']}x")
+            print(f"  Reasons: {' + '.join(s['reasons'])}")
+    else:
+        print("\nNo clean setups today. WAIT.")
