@@ -1,5 +1,6 @@
 import sys
 sys.path.append(".")
+
 from data.angel_api import fetch_all_stocks
 from indicators.technical import calculate_indicators, get_latest
 import numpy as np

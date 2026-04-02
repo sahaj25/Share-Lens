@@ -11,36 +11,38 @@ def calculate_hold_days(adx, rsi, vol_ratio):
 
 def calculate_position_size(entry, sl, total_capital=25000, risk_per_trade=500):
     """
-    Calculate how many shares to buy
+    Calculate how many shares to buy/short
     Risk per trade = max money you're willing to lose on this trade
     """
     risk_per_share = abs(entry - sl)
     if risk_per_share == 0:
         return 0
-    
+
     qty = int(risk_per_trade / risk_per_share)
     capital_needed = qty * entry
-    
+
     # Cap at 40% of total capital per trade
     max_capital = total_capital * 0.4
     if capital_needed > max_capital:
         qty = int(max_capital / entry)
-    
+
     return qty
 
 
 def score_signal(signal):
     """
-    Detailed scoring breakdown for a signal
-    Returns enriched signal with full scoring details
+    Detailed scoring breakdown for a signal.
+    Returns enriched signal with full scoring details.
     """
     breakdown = {}
     total = 0
 
-    # Trend direction — 20 pts
-    if signal["trend"] == "bullish":
+    # Trend direction — 20 pts (both bullish and bearish are valid)
+    if signal["trend"] in ("bullish", "bearish"):
         breakdown["trend"] = 20
         total += 20
+    else:
+        breakdown["trend"] = 0
 
     # ADX strength — 20 pts
     adx = signal["adx"]
@@ -55,17 +57,33 @@ def score_signal(signal):
 
     # RSI timing — 20 pts
     rsi = signal["rsi"]
-    if 45 <= rsi <= 60:
-        breakdown["rsi"] = 20
-        total += 20
-    elif rsi < 45:
-        breakdown["rsi"] = 18  # Oversold — slightly less ideal but still good
-        total += 18
-    elif rsi <= 70:
-        breakdown["rsi"] = 10
-        total += 10
-    else:
-        breakdown["rsi"] = 0
+    trend = signal["trend"]
+
+    if trend == "bullish":
+        if 45 <= rsi <= 60:
+            breakdown["rsi"] = 20
+            total += 20
+        elif rsi < 45:
+            breakdown["rsi"] = 18   # Oversold — slightly less ideal but still good
+            total += 18
+        elif rsi <= 70:
+            breakdown["rsi"] = 10
+            total += 10
+        else:
+            breakdown["rsi"] = 0
+
+    elif trend == "bearish":
+        if 40 <= rsi <= 55:
+            breakdown["rsi"] = 20   # Ideal bearish momentum zone
+            total += 20
+        elif rsi > 55:
+            breakdown["rsi"] = 18   # Overbought territory — still valid for shorts
+            total += 18
+        elif rsi >= 30:
+            breakdown["rsi"] = 10
+            total += 10
+        else:
+            breakdown["rsi"] = 0    # Oversold — risky to short
 
     # Volume — 20 pts
     vol = signal["vol_ratio"]
@@ -113,32 +131,32 @@ def score_signal(signal):
 
 # Quick test
 if __name__ == "__main__":
-    # Simulate the ONGC signal we got
-    test_signal = {
-        "symbol": "ONGC",
-        "score": 8.0,
-        "entry": 284.6,
-        "sl": 274.2,
-        "target": 305.6,
-        "sl_pct": 3.7,
-        "target_pct": 7.4,
-        "rr": 2.0,
-        "rsi": 65.3,
-        "adx": 32.2,
-        "vol_ratio": 1.51,
-        "trend": "bullish",
-        "reasons": ["EMA20 > EMA50", "ADX 32.2", "Volume 1.5x", "no key level nearby"],
-        "close": 284.6,
-    }
+    test_signals = [
+        {
+            "symbol": "ONGC",
+            "entry": 284.6, "sl": 274.2, "target": 305.6,
+            "sl_pct": 3.7, "target_pct": 7.4, "rr": 2.0,
+            "rsi": 65.3, "adx": 32.2, "vol_ratio": 1.51,
+            "trend": "bullish",
+            "reasons": ["EMA20 > EMA50", "ADX 32.2", "Volume 1.5x", "no key level nearby"],
+        },
+        {
+            "symbol": "COFORGE",
+            "entry": 1213.4, "sl": 1288.0, "target": 1064.1,
+            "sl_pct": 6.1, "target_pct": 12.3, "rr": 2.0,
+            "rsi": 52.5, "adx": 42.3, "vol_ratio": 1.87,
+            "trend": "bearish",
+            "reasons": ["EMA20 < EMA50 (bearish trend)", "ADX 42.3", "Volume 1.9x average"],
+        },
+    ]
 
-    enriched = score_signal(test_signal)
-
-    print(f"Symbol: {enriched['symbol']}")
-    print(f"Final Score: {enriched['score']}/10")
-    print(f"Raw Score: {enriched['raw_score']}/100")
-    print(f"Breakdown: {enriched['score_breakdown']}")
-    print(f"Hold: {enriched['hold_days']}")
-    print(f"Qty to buy: {enriched['qty']} shares")
-    print(f"Capital needed: ₹{enriched['capital_needed']}")
-    print(f"Max loss: ₹{enriched['max_loss']}")
-    print(f"Max profit: ₹{enriched['max_profit']}")
+    for sig in test_signals:
+        enriched = score_signal(sig)
+        print(f"\nSymbol:    {enriched['symbol']} ({enriched['trend'].upper()})")
+        print(f"Score:     {enriched['score']}/10  (raw {enriched['raw_score']}/100)")
+        print(f"Breakdown: {enriched['score_breakdown']}")
+        print(f"Hold:      {enriched['hold_days']}")
+        print(f"Qty:       {enriched['qty']} shares")
+        print(f"Capital:   ₹{enriched['capital_needed']}")
+        print(f"Max Loss:  ₹{enriched['max_loss']}")
+        print(f"Max Profit:₹{enriched['max_profit']}")

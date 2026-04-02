@@ -1,4 +1,5 @@
 import os
+import html
 import requests
 from dotenv import load_dotenv
 from datetime import datetime
@@ -6,25 +7,35 @@ from datetime import datetime
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+# Support multiple chat IDs — comma separated in .env
+# Example: TELEGRAM_CHAT_IDS=123456789,987654321
+CHAT_IDS = [cid.strip() for cid in os.getenv("TELEGRAM_CHAT_IDS", "").split(",") if cid.strip()]
+
+# Fallback to single CHAT_ID if TELEGRAM_CHAT_IDS not set
+if not CHAT_IDS:
+    single = os.getenv("TELEGRAM_CHAT_ID", "")
+    if single:
+        CHAT_IDS = [single]
 
 
 def send_message(text):
-    """Send a message to Telegram"""
+    """Send a message to all configured Telegram chat IDs"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": text,
-"parse_mode": "HTML",
-    }
-    try:
-        response = requests.post(url, json=payload)
-        if response.status_code == 200:
-            print("  ✅ Telegram message sent")
-        else:
-            print(f"  ❌ Telegram error: {response.text}")
-    except Exception as e:
-        print(f"  ❌ Telegram exception: {e}")
+    for chat_id in CHAT_IDS:
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+        }
+        try:
+            response = requests.post(url, json=payload)
+            if response.status_code == 200:
+                print(f"  ✅ Telegram message sent → {chat_id}")
+            else:
+                print(f"  ❌ Telegram error for {chat_id}: {response.text}")
+        except Exception as e:
+            print(f"  ❌ Telegram exception for {chat_id}: {e}")
 
 
 def format_swing_alert(signals, total_stocks):
@@ -39,12 +50,13 @@ def format_swing_alert(signals, total_stocks):
         lines.append(f"\n📊 {total_stocks} stocks scanned — WAIT for better conditions.")
         return "\n".join(lines)
 
-    bullish = [s for s in signals if s["trend"] == "bullish"]
-    bearish = [s for s in signals if s["trend"] == "bearish"]
+    bullish = [s for s in signals if s["trend"].lower() == "bullish"]
+    bearish = [s for s in signals if s["trend"].lower() == "bearish"]
 
     if bullish:
         lines.append(f"🟢 <b>BULLISH SETUPS — {len(bullish)} found:</b>\n")
         for i, s in enumerate(bullish, 1):
+            reasons = ' + '.join(html.escape(r) for r in s['reasons'])
             lines.append(f"<b>{i}. {s['symbol']} — Score {s['score']}/10</b>")
             lines.append(f"   Entry: ₹{s['entry']}")
             lines.append(f"   Stop Loss: ₹{s['sl']} ({s['sl_pct']}% risk)")
@@ -53,11 +65,12 @@ def format_swing_alert(signals, total_stocks):
             lines.append(f"   Hold: {s.get('hold_days', '5-8 days')}")
             lines.append(f"   Qty: {s.get('qty', '-')} shares | Capital: ₹{int(s.get('capital_needed', 0))}")
             lines.append(f"   Max Loss: ₹{int(s.get('max_loss', 0))} | Max Profit: ₹{int(s.get('max_profit', 0))}")
-            lines.append(f"   Reason: {' + '.join(s['reasons'])}\n")
+            lines.append(f"   Reason: {reasons}\n")
 
     if bearish:
         lines.append(f"🔴 <b>BEARISH SETUPS (SHORT) — {len(bearish)} found:</b>\n")
         for i, s in enumerate(bearish, 1):
+            reasons = ' + '.join(html.escape(r) for r in s['reasons'])
             lines.append(f"<b>{i}. {s['symbol']} — Score {s['score']}/10</b>")
             lines.append(f"   Short Entry: ₹{s['entry']}")
             lines.append(f"   Stop Loss: ₹{s['sl']} ({s['sl_pct']}% risk)")
@@ -66,7 +79,7 @@ def format_swing_alert(signals, total_stocks):
             lines.append(f"   Hold: {s.get('hold_days', '5-8 days')}")
             lines.append(f"   Qty: {s.get('qty', '-')} shares | Capital: ₹{int(s.get('capital_needed', 0))}")
             lines.append(f"   Max Loss: ₹{int(s.get('max_loss', 0))} | Max Profit: ₹{int(s.get('max_profit', 0))}")
-            lines.append(f"   Reason: {' + '.join(s['reasons'])}\n")
+            lines.append(f"   Reason: {reasons}\n")
 
     rejected = total_stocks - len(signals)
     lines.append(f"❌ {rejected} stocks — No clean setup. WAIT.")

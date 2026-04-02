@@ -36,14 +36,29 @@ def run_morning_scan():
 
     # Step 3 — Score each signal
     print(f"\n[3/4] Scoring signals...")
+    print(f"  {'SYMBOL':<15} {'SCANNER SCORE':<15} {'ENGINE SCORE':<15} {'TREND':<12} {'PASS?'}")
+    print(f"  {'-'*65}")
+
     scored_signals = []
     for signal in raw_signals:
+        scanner_score = signal.get("score", "N/A")
         enriched = score_signal(signal)
-        if enriched["score"] >= 7.0:
-            scored_signals.append(enriched)
-            print(f"  ✅ {enriched['symbol']} — {enriched['score']}/10")
+        engine_score = enriched.get("score", 0)
+        trend = enriched.get("trend", "unknown")
+        passed = engine_score >= 7.0
 
-    print(f"Final signals: {len(scored_signals)}")
+        status = "✅ PASS" if passed else f"❌ DROPPED (score={engine_score})"
+        print(f"  {enriched['symbol']:<15} {str(scanner_score):<15} {str(engine_score):<15} {trend:<12} {status}")
+
+        if passed:
+            scored_signals.append(enriched)
+
+    print(f"\nFinal signals: {len(scored_signals)}")
+
+    if scored_signals:
+        print(f"\n  Signals being sent to Telegram:")
+        for s in scored_signals:
+            print(f"    → {s['symbol']} | score={s['score']} | trend={s['trend']}")
 
     # Step 4 — Send Telegram alert
     print(f"\n[4/4] Sending Telegram alert...")
