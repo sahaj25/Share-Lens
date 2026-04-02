@@ -15,7 +15,7 @@ def send_message(text):
     payload = {
         "chat_id": CHAT_ID,
         "text": text,
-        "parse_mode": "HTML"
+"parse_mode": "HTML",
     }
     try:
         response = requests.post(url, json=payload)
@@ -39,18 +39,34 @@ def format_swing_alert(signals, total_stocks):
         lines.append(f"\n📊 {total_stocks} stocks scanned — WAIT for better conditions.")
         return "\n".join(lines)
 
-    lines.append(f"✅ <b>{len(signals)} SETUP(S) FOUND:</b>\n")
+    bullish = [s for s in signals if s["trend"] == "bullish"]
+    bearish = [s for s in signals if s["trend"] == "bearish"]
 
-    for i, s in enumerate(signals, 1):
-        lines.append(f"<b>{i}. {s['symbol']} — Score {s['score']}/10 🟢</b>")
-        lines.append(f"   Entry: ₹{s['entry']}")
-        lines.append(f"   Stop Loss: ₹{s['sl']} ({s['sl_pct']}% risk)")
-        lines.append(f"   Target: ₹{s['target']} ({s['target_pct']}% gain)")
-        lines.append(f"   R/R: 1:{s['rr']} ✅")
-        lines.append(f"   Hold: {s['hold_days']}")
-        lines.append(f"   Qty: {s['qty']} shares | Capital: ₹{int(s['capital_needed'])}")
-        lines.append(f"   Max Loss: ₹{int(s['max_loss'])} | Max Profit: ₹{int(s['max_profit'])}")
-        lines.append(f"   Reason: {' + '.join(s['reasons'])}\n")
+    if bullish:
+        lines.append(f"🟢 <b>BULLISH SETUPS — {len(bullish)} found:</b>\n")
+        for i, s in enumerate(bullish, 1):
+            lines.append(f"<b>{i}. {s['symbol']} — Score {s['score']}/10</b>")
+            lines.append(f"   Entry: ₹{s['entry']}")
+            lines.append(f"   Stop Loss: ₹{s['sl']} ({s['sl_pct']}% risk)")
+            lines.append(f"   Target: ₹{s['target']} ({s['target_pct']}% gain)")
+            lines.append(f"   R/R: 1:{s['rr']} ✅")
+            lines.append(f"   Hold: {s.get('hold_days', '5-8 days')}")
+            lines.append(f"   Qty: {s.get('qty', '-')} shares | Capital: ₹{int(s.get('capital_needed', 0))}")
+            lines.append(f"   Max Loss: ₹{int(s.get('max_loss', 0))} | Max Profit: ₹{int(s.get('max_profit', 0))}")
+            lines.append(f"   Reason: {' + '.join(s['reasons'])}\n")
+
+    if bearish:
+        lines.append(f"🔴 <b>BEARISH SETUPS (SHORT) — {len(bearish)} found:</b>\n")
+        for i, s in enumerate(bearish, 1):
+            lines.append(f"<b>{i}. {s['symbol']} — Score {s['score']}/10</b>")
+            lines.append(f"   Short Entry: ₹{s['entry']}")
+            lines.append(f"   Stop Loss: ₹{s['sl']} ({s['sl_pct']}% risk)")
+            lines.append(f"   Target: ₹{s['target']} ({s['target_pct']}% gain)")
+            lines.append(f"   R/R: 1:{s['rr']} ✅")
+            lines.append(f"   Hold: {s.get('hold_days', '5-8 days')}")
+            lines.append(f"   Qty: {s.get('qty', '-')} shares | Capital: ₹{int(s.get('capital_needed', 0))}")
+            lines.append(f"   Max Loss: ₹{int(s.get('max_loss', 0))} | Max Profit: ₹{int(s.get('max_profit', 0))}")
+            lines.append(f"   Reason: {' + '.join(s['reasons'])}\n")
 
     rejected = total_stocks - len(signals)
     lines.append(f"❌ {rejected} stocks — No clean setup. WAIT.")
@@ -68,7 +84,6 @@ def send_swing_alert(signals, total_stocks):
 
 # Quick test
 if __name__ == "__main__":
-    # Simulate the ONGC signal
     test_signals = [
         {
             "symbol": "ONGC",
@@ -89,6 +104,26 @@ if __name__ == "__main__":
             "capital_needed": 9961.0,
             "max_loss": 364.0,
             "max_profit": 735.0,
+        },
+        {
+            "symbol": "HDFCBANK",
+            "score": 7.8,
+            "entry": 1685.0,
+            "sl": 1720.0,
+            "target": 1615.0,
+            "sl_pct": 2.1,
+            "target_pct": 4.2,
+            "rr": 2.0,
+            "rsi": 55.0,
+            "adx": 47.7,
+            "vol_ratio": 1.80,
+            "trend": "bearish",
+            "reasons": ["EMA20 < EMA50 (bearish trend)", "ADX 47.7", "Volume 1.8x average", "at key resistance"],
+            "hold_days": "3-5 days",
+            "qty": 10,
+            "capital_needed": 16850.0,
+            "max_loss": 350.0,
+            "max_profit": 700.0,
         }
     ]
 
