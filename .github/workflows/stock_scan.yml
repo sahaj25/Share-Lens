@@ -1,0 +1,55 @@
+name: Share-Lens Stock Scan
+
+on:
+  schedule:
+    # All times in UTC (IST = UTC + 5:30)
+    - cron: '45 3 * * 1-5'   # 09:15 IST — Market Open Scan
+    - cron: '30 6 * * 1-5'   # 12:00 IST — Midday Scan
+    - cron: '45 9 * * 1-5'   # 15:15 IST — Pre-Close Scan
+
+  workflow_dispatch:          # Allow manual trigger from GitHub UI
+
+jobs:
+  run-scan:
+    name: Run Swing Scanner
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run main.py
+        working-directory: backend
+        env:
+          # --- AngelOne / SmartAPI credentials ---
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+
+          # --- Telegram bot ---
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_IDS }}
+
+          # --- Gemini AI (if used) ---
+          GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
+
+        run: python main.py
+
+      - name: Upload logs
+        if: always()           # Upload even if the scan step fails
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-logs-${{ github.run_id }}
+          path: backend/logs/
+          retention-days: 7
