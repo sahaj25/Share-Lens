@@ -39,7 +39,7 @@ jobs:
 
           # --- Telegram bot ---
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_IDS }}
+          TELEGRAM_CHAT_IDS:   ${{ secrets.TELEGRAM_CHAT_IDS }}
 
           # --- Gemini AI (if used) ---
           GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
