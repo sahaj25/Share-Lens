@@ -2,10 +2,12 @@ import sys
 sys.path.append(".")
 
 from data.angel_api import fetch_all_stocks
+from data.token_resolver import resolve_tokens
 from indicators.technical import calculate_indicators, get_latest
 from scanners.swing_scanner import scan_stock
 from scoring.engine import score_signal
 from alerts.telegram_bot import send_swing_alert
+from monitor.position_monitor import ask_trades_via_telegram
 from datetime import datetime
 
 
@@ -16,7 +18,7 @@ def run_morning_scan():
     print("="*50)
 
     # Step 1 — Fetch data
-    print("\n[1/4] Fetching Nifty 50 data...")
+    print("\n[1/4] Fetching data...")
     all_data = fetch_all_stocks()
     if not all_data:
         print("Failed to fetch data. Exiting.")
@@ -63,6 +65,11 @@ def run_morning_scan():
     # Step 4 — Send Telegram alert
     print(f"\n[4/4] Sending Telegram alert...")
     send_swing_alert(scored_signals, total_stocks)
+
+    # Step 5 — Ask which trades via Telegram + auto start monitor
+    if scored_signals:
+        stock_universe = resolve_tokens()
+        ask_trades_via_telegram(scored_signals, stock_universe)
 
     print("\nScan complete.")
     print("="*50)

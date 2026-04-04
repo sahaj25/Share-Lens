@@ -1,0 +1,57 @@
+[
+  {
+    "symbol": "ASIANPAINT",
+    "token": "236",
+    "entry": 2169.0,
+    "sl": 2247.2,
+    "target": 2012.6,
+    "trend": "bearish",
+    "qty": 4,
+    "added_at": "2026-04-04 13:41",
+    "status": "open"
+  },
+  {
+    "symbol": "JSWSTEEL",
+    "token": "11723",
+    "entry": 1141.3,
+    "sl": 1193.0,
+    "target": 1037.8,
+    "trend": "bearish",
+    "qty": 8,
+    "added_at": "2026-04-04 13:41",
+    "status": "open"
+  },
+  {
+    "symbol": "HCLTECH",
+    "token": "7229",
+    "entry": 1402.2,
+    "sl": 1465.4,
+    "target": 1275.8,
+    "trend": "bearish",
+    "qty": 7,
+    "added_at": "2026-04-04 13:57",
+    "status": "open"
+  },
+  {
+    "symbol": "COFORGE",
+    "token": "11543",
+    "entry": 1213.4,
+    "sl": 1288.0,
+    "target": 1064.1,
+    "trend": "bearish",
+    "qty": 6,
+    "added_at": "2026-04-04 13:57",
+    "status": "open"
+  },
+  {
+    "symbol": "TATACHEM",
+    "token": "3405",
+    "entry": 651.9,
+    "sl": 687.9,
+    "target": 579.9,
+    "trend": "bearish",
+    "qty": 13,
+    "added_at": "2026-04-04 14:09",
+    "status": "open"
+  }
+]
