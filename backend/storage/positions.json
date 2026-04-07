@@ -53,5 +53,38 @@
     "qty": 13,
     "added_at": "2026-04-04 14:09",
     "status": "open"
+  },
+  {
+    "symbol": "TRENT",
+    "token": "1964",
+    "entry": 3836.4,
+    "sl": 4042.8,
+    "target": 3423.6,
+    "trend": "bearish",
+    "qty": 2,
+    "added_at": "2026-04-07 14:25",
+    "status": "open"
+  },
+  {
+    "symbol": "JUSTDIAL",
+    "token": "29962",
+    "entry": 531.4,
+    "sl": 556.9,
+    "target": 480.3,
+    "trend": "bearish",
+    "qty": 18,
+    "added_at": "2026-04-07 14:25",
+    "status": "open"
+  },
+  {
+    "symbol": "GODREJCP",
+    "token": "10099",
+    "entry": 1030.2,
+    "sl": 1071.1,
+    "target": 948.5,
+    "trend": "bearish",
+    "qty": 9,
+    "added_at": "2026-04-07 14:25",
+    "status": "open"
   }
 ]
