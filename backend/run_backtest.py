@@ -5,9 +5,17 @@ Usage: python run_backtest.py
 
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pytz
 import pandas as pd
+
+# ── Load .env ─────────────────────────────
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+import os
 
 from rich.console import Console
 from rich.table import Table
@@ -29,29 +37,36 @@ console = Console()
 # Data Fetching (historical)
 # ─────────────────────────────────────────
 
-def fetch_historical(client: AngelOneClient, symbol: str, days: int = 30) -> pd.DataFrame | None:
+def fetch_historical(client: AngelOneClient, symbol: str,
+                     from_date: date | None = None,
+                     to_date: date | None = None,
+                     days: int = 30) -> pd.DataFrame | None:
     """
-    Fetch ~30 days of 1-min candle data by chunking requests.
-    Angel One allows max 30 days per call for 1-min data.
+    Fetch 1-min candle data for a date range.
+    from_date / to_date override the days parameter when provided.
+    Angel One max: 30 days per ONE_MINUTE request.
     """
-    token, _ = get_token(symbol)   # get_token now returns (token, name)
+    token, _ = get_token(symbol)
+
+    now = datetime.now(IST)
+    if to_date is None:
+        to_date = now.date()
+    if from_date is None:
+        from_date = (now - timedelta(days=min(days, 29))).date()
 
     if client.demo_mode:
-        # Generate multi-day synthetic data
-        return _generate_multi_day_demo(symbol, days)
+        days_requested = (to_date - from_date).days + 1
+        return _generate_multi_day_demo(symbol, days_requested, anchor_date=to_date)
 
     try:
         from SmartApi import SmartConnect
-        now = datetime.now(IST)
-        # Angel One: max 30 days for ONE_MINUTE interval
-        from_dt = now - timedelta(days=min(days, 29))
 
         params = {
             "exchange": "NSE",
             "symboltoken": token,
             "interval": "ONE_MINUTE",
-            "fromdate": from_dt.strftime("%Y-%m-%d 09:15"),
-            "todate": now.strftime("%Y-%m-%d 15:30"),
+            "fromdate": f"{from_date} 09:15",
+            "todate":   f"{to_date} 15:30",
         }
         resp = client.obj.getCandleData(params)
         if resp["status"] and resp["data"]:
@@ -71,18 +86,22 @@ def fetch_historical(client: AngelOneClient, symbol: str, days: int = 30) -> pd.
         return None
 
 
-def _generate_multi_day_demo(symbol: str, days: int = 30) -> pd.DataFrame:
+def _generate_multi_day_demo(symbol: str, days: int = 30,
+                              anchor_date=None) -> pd.DataFrame:
     """Synthetic multi-day 1-min data for demo backtesting"""
     import numpy as np
     rng = np.random.default_rng(abs(hash(symbol)) % (2**32))
 
-    now = datetime.now(IST)
+    if anchor_date is None:
+        anchor_date = datetime.now(IST).date()
+    anchor_dt = datetime.combine(anchor_date, __import__('datetime').time(15, 30))
+    anchor_dt = IST.localize(anchor_dt)
     all_rows = []
 
     base_price = rng.uniform(500, 3000)
     # Simulate persistent price drift across days
     for d in range(days, 0, -1):
-        day = now - timedelta(days=d)
+        day = anchor_dt - timedelta(days=d)
         if day.weekday() >= 5:   # skip weekends
             continue
 

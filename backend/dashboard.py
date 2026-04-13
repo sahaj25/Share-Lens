@@ -20,6 +20,15 @@ from rich.prompt import Prompt, Confirm
 from signal_engine import analyse_symbol
 from angel_client import AngelOneClient, get_token
 
+# ── Load .env if present ──────────────────
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed — will fall back to manual input
+
+import os
+
 IST = pytz.timezone("Asia/Kolkata")
 console = Console()
 
@@ -190,32 +199,69 @@ def setup_wizard():
         border_style="cyan"
     ))
 
-    use_demo = Confirm.ask("\n[yellow]Demo mode?[/yellow] (synthetic data, no API)", default=True)
+    # ── Try loading credentials from .env ──────────────────────────
+    api_key     = os.getenv("ANGEL_API_KEY")
+    client_id   = os.getenv("ANGEL_CLIENT_ID")
+    password    = os.getenv("ANGEL_PASSWORD")
+    totp_secret = os.getenv("ANGEL_TOTP_SECRET")
 
-    if use_demo:
-        client   = AngelOneClient("DEMO", "DEMO", "DEMO", "DEMO")
-        client.connected  = True
-        client.demo_mode  = True
-        mode_str = "DEMO MODE"
-    else:
-        console.print("\n[bold]Angel One credentials:[/bold]")
-        api_key     = Prompt.ask("API Key")
-        client_id   = Prompt.ask("Client ID")
-        password    = Prompt.ask("Password", password=True)
-        totp_secret = Prompt.ask("TOTP Secret")
+    env_loaded = all([api_key, client_id, password, totp_secret])
+
+    if env_loaded:
+        console.print("\n[green]✓ Credentials loaded from .env[/green]")
+        console.print(f"  [dim]Client ID: {client_id}  |  API Key: {api_key[:4]}{'*' * (len(api_key)-4)}[/dim]")
 
         client = AngelOneClient(api_key, client_id, password, totp_secret)
-        with console.status("[cyan]Connecting..."):
+        with console.status("[cyan]Connecting to Angel One..."):
             ok, msg = client.connect()
 
         if ok:
             console.print(f"[green]✓ {msg}[/green]")
             mode_str = "LIVE"
         else:
-            console.print(f"[red]✗ {msg} — falling back to DEMO[/red]")
+            console.print(f"[red]✗ {msg}[/red]")
+            console.print("[yellow]Falling back to DEMO mode[/yellow]")
             client.demo_mode = True
             client.connected = True
+            mode_str = "DEMO MODE (connection failed)"
+
+    else:
+        # Show which keys are missing
+        missing = [k for k, v in {
+            "ANGEL_API_KEY": api_key, "ANGEL_CLIENT_ID": client_id,
+            "ANGEL_PASSWORD": password, "ANGEL_TOTP_SECRET": totp_secret
+        }.items() if not v]
+
+        if missing:
+            console.print(f"\n[yellow]⚠ .env missing:[/yellow] {', '.join(missing)}")
+            console.print("[dim]  Create a .env file in this folder with those keys, or enter manually below.[/dim]")
+
+        use_demo = Confirm.ask("\n[yellow]Run in Demo mode?[/yellow] (no API calls)", default=True)
+
+        if use_demo:
+            client = AngelOneClient("DEMO", "DEMO", "DEMO", "DEMO")
+            client.connected = True
+            client.demo_mode = True
             mode_str = "DEMO MODE"
+        else:
+            console.print("\n[bold]Enter Angel One credentials manually:[/bold]")
+            api_key     = api_key     or Prompt.ask("API Key")
+            client_id   = client_id   or Prompt.ask("Client ID")
+            password    = password    or Prompt.ask("Password", password=True)
+            totp_secret = totp_secret or Prompt.ask("TOTP Secret")
+
+            client = AngelOneClient(api_key, client_id, password, totp_secret)
+            with console.status("[cyan]Connecting..."):
+                ok, msg = client.connect()
+
+            if ok:
+                console.print(f"[green]✓ {msg}[/green]")
+                mode_str = "LIVE"
+            else:
+                console.print(f"[red]✗ {msg} — falling back to DEMO[/red]")
+                client.demo_mode = True
+                client.connected = True
+                mode_str = "DEMO MODE"
 
     console.print("\n[bold]Symbols to track[/bold] (any NSE symbol — e.g. OLAELEC,SUZLON,TCS)")
     raw     = Prompt.ask("Symbols", default="RELIANCE,TCS")

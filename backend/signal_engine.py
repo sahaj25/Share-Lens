@@ -331,22 +331,34 @@ def analyse_symbol(df: pd.DataFrame, symbol: str,
 # RISK MANAGEMENT
 # ═══════════════════════════════════════════════════════
 
+MAX_SL_PCT = 0.015   # SL capped at 1.5% of entry price (matches backtester Rule C)
+
 def _add_risk(result: dict, price: float, vwap: float,
               orb: dict | None, capital: float):
-    sig     = result["signal"]
+    sig      = result["signal"]
     max_loss = capital * 0.01
 
     if orb and orb.get("formed"):
         if "BUY" in sig:
-            sl = orb["low"];  risk_ps = max(price - sl, 0.01)
+            raw_sl = orb["low"];  risk_ps = max(price - raw_sl, 0.01)
         elif "SELL" in sig:
-            sl = orb["high"]; risk_ps = max(sl - price, 0.01)
+            raw_sl = orb["high"]; risk_ps = max(raw_sl - price, 0.01)
         else:
-            sl = vwap;        risk_ps = max(abs(price - vwap), price * 0.005)
+            raw_sl = vwap;        risk_ps = max(abs(price - vwap), price * 0.005)
     else:
-        sl      = vwap
+        raw_sl  = vwap
         risk_ps = max(abs(price - vwap), price * 0.005)
 
+    # ── Cap SL at MAX_SL_PCT of entry price ──────────────
+    max_sl_distance = price * MAX_SL_PCT
+    if "BUY" in sig:
+        sl = max(raw_sl, price - max_sl_distance)   # SL can't be more than 1.5% below entry
+    elif "SELL" in sig:
+        sl = min(raw_sl, price + max_sl_distance)   # SL can't be more than 1.5% above entry
+    else:
+        sl = raw_sl
+
+    risk_ps = max(abs(price - sl), 0.01)            # recalculate after capping
     qty = max(1, int(max_loss / risk_ps))
 
     result["risk"] = {
