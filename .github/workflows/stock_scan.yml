@@ -4,8 +4,6 @@ on:
   schedule:
     # All times in UTC (IST = UTC + 5:30)
     - cron: '45 3 * * 1-5'   # 09:15 IST — Market Open Scan
-    - cron: '30 6 * * 1-5'   # 12:00 IST — Midday Scan
-    - cron: '45 9 * * 1-5'   # 15:15 IST — Pre-Close Scan
 
   workflow_dispatch:          # Allow manual trigger from GitHub UI
 

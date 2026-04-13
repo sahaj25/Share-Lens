@@ -9,12 +9,13 @@ from scoring.engine import score_signal
 from alerts.telegram_bot import send_swing_alert
 from monitor.position_monitor import ask_trades_via_telegram
 from datetime import datetime
-
+import pytz
 
 def run_morning_scan():
     print("="*50)
-    print(f"STOKIFY — SWING SCAN")
-    print(f"Time: {datetime.now().strftime('%d %B %Y | %I:%M %p')}")
+    print(f"ShareLens — SWING SCAN")
+    ist = pytz.timezone("Asia/Kolkata")
+    print(f"Time: {datetime.now(ist).strftime('%d %B %Y | %I:%M %p')}")
     print("="*50)
 
     # Step 1 — Fetch data

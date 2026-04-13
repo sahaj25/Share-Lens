@@ -3,6 +3,7 @@ import html
 import requests
 from dotenv import load_dotenv
 from datetime import datetime
+import pytz
 
 load_dotenv()
 
@@ -40,7 +41,8 @@ def send_message(text):
 
 def format_swing_alert(signals, total_stocks):
     """Format the full swing scan report"""
-    date_str = datetime.now().strftime("%d %B %Y | %I:%M %p")
+    ist = pytz.timezone("Asia/Kolkata")
+    date_str = datetime.now(ist).strftime("%d %B %Y | %I:%M %p IST")
 
     lines = []
     lines.append(f"🔍 <b>SWING SCAN — {date_str}</b>\n")
