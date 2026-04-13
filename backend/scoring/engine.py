@@ -10,18 +10,12 @@ def calculate_hold_days(adx, rsi, vol_ratio):
 
 
 def calculate_position_size(entry, sl, total_capital=25000, risk_per_trade=500):
-    """
-    Calculate how many shares to buy/short
-    Risk per trade = max money you're willing to lose on this trade
-    """
     risk_per_share = abs(entry - sl)
-    if risk_per_share == 0:
+    if risk_per_share == 0 or risk_per_share != risk_per_share:  # NaN check
         return 0
 
     qty = int(risk_per_trade / risk_per_share)
     capital_needed = qty * entry
-
-    # Cap at 40% of total capital per trade
     max_capital = total_capital * 0.4
     if capital_needed > max_capital:
         qty = int(max_capital / entry)

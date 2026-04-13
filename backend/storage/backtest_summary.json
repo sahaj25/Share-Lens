@@ -1,0 +1,14 @@
+{
+  "total_trades": 55,
+  "wins": 45,
+  "losses": 10,
+  "timeouts": 0,
+  "win_rate": 81.8,
+  "avg_win_pct": 3.87,
+  "avg_loss_pct": -2.5,
+  "expectancy": 2.71,
+  "bullish_trades": 35,
+  "bullish_win_rate": 77.1,
+  "bearish_trades": 20,
+  "bearish_win_rate": 90.0
+}

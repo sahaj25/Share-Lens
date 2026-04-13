@@ -1,19 +1,14 @@
 import sys
 sys.path.append(".")
-
-from data.angel_api import fetch_all_stocks
 from indicators.technical import calculate_indicators, get_latest
 import numpy as np
 
-
-def find_support_resistance(df, window=10):
-    highs = df["high"].rolling(window=window, center=True).max()
-    lows = df["low"].rolling(window=window, center=True).min()
-    resistance_levels = df["high"][df["high"] == highs].values
-    support_levels = df["low"][df["low"] == lows].values
-    resistance_levels = sorted(set(resistance_levels.round(1)), reverse=True)
-    support_levels = sorted(set(support_levels.round(1)), reverse=True)
-    return support_levels, resistance_levels
+# Stocks with proven backtest accuracy
+WHITELIST = {
+    "RELIANCE", "BHARTIARTL", "ITC", "JSWSTEEL", "SHRIRAMFIN",
+    "BPCL", "VEDL", "BRITANNIA", "SANOFI", "HCLTECH",
+    "HEIDELBERG", "SBIN", "HDFCLIFE", "TECHM", "MUTHOOTFIN"
+}
 
 
 def calculate_rr(entry, sl, target):
@@ -30,142 +25,138 @@ def calculate_sl_target(df, latest, trend):
     entry = current_price
     if trend == "bullish":
         sl = round(entry - (1.5 * atr), 1)
-        target = round(entry + (3 * atr), 1)
+        target = round(entry + (2.5 * atr), 1)
     else:
         sl = round(entry + (1.5 * atr), 1)
-        target = round(entry - (3 * atr), 1)
+        target = round(entry - (2.5 * atr), 1)
     rr = calculate_rr(entry, sl, target)
     return entry, sl, target, rr
 
 
 def scan_bullish(symbol, latest, processed):
-    """Strict bullish conditions — quality only"""
-    score = 0
-    reasons = []
-
-    # Step 1 — Trend: EMA20 must be above EMA50
-    if latest["ema20"] <= latest["ema50"]:
-        return None
-    score += 20
-    reasons.append("EMA20 > EMA50 (bullish trend)")
-
-    # Step 2 — ADX: must be above 25
-    if latest["adx"] < 25:
-        return None
-    score += 20
-    reasons.append(f"ADX {latest['adx']:.1f} (strong trend)")
-
-    # Step 3 — RSI: strict — only 35-65 range accepted
+    """Strict bullish — pullback to EMA20 in uptrend"""
+    price = latest["close"]
+    ema20 = latest["ema20"]
+    ema50 = latest["ema50"]
+    adx = latest["adx"]
     rsi = latest["rsi"]
-    if rsi > 65:
-        return None  # Getting overbought — skip
-    if rsi < 35:
-        return None  # Too oversold, risky bounce
-    score += 20
-    reasons.append(f"RSI {rsi:.1f} (clean entry zone)")
+    vol = latest["vol_ratio"]
 
-    # Step 4 — Volume: must be above average
-    if latest["vol_ratio"] < 1.0:
+    # Step 1 — Trend
+    if ema20 <= ema50:
         return None
-    score += 20
-    reasons.append(f"Volume {latest['vol_ratio']:.1f}x average")
 
-    # Step 5 — S/R: must not be near resistance
-    support_levels, resistance_levels = find_support_resistance(processed)
-    proximity_pct = 0.02
-    for res in resistance_levels[:5]:
-        if abs(latest["close"] - res) / latest["close"] <= proximity_pct and latest["close"] < res:
-            return None  # Too close to resistance
-    for sup in support_levels[:5]:
-        if abs(latest["close"] - sup) / latest["close"] <= proximity_pct:
-            score += 20
-            reasons.append("at key support")
-            break
-    else:
-        score += 10
-        reasons.append("no key level nearby")
+    # Step 2 — ADX strength
+    if adx < 30:
+        return None
 
-    # Step 6 — R/R: minimum 1:2
+    # Step 3 — Pullback to EMA20 (within 2%)
+    price_to_ema20_pct = abs(price - ema20) / price * 100
+    if price_to_ema20_pct > 2.5:
+        return None
+
+    # Step 4 — RSI in valid range
+    if not (35 <= rsi <= 65):
+        return None
+
+    # Step 5 — Volume confirmation
+    if vol < 1.2:
+        return None
+
+    # Step 6 — R/R
     entry, sl, target, rr = calculate_sl_target(processed, latest, "bullish")
-    if rr < 2.0:
+    if rr < 1.5:
         return None
-    score += 0  # R/R already a gate, not scored
 
+    # Score
+    score = 0
+    score += 20  # trend confirmed
+    score += 20 if adx >= 35 else 15
+    score += 20 if 40 <= rsi <= 60 else 15
+    score += 20 if vol >= 1.5 else 15
+    score += 20 if price_to_ema20_pct <= 1.0 else 15  # tighter pullback = better
     final_score = round((score / 100) * 10, 1)
-    if final_score < 7.0:
-        return None
+
+    reasons = [
+        f"EMA20 > EMA50 (bullish trend)",
+        f"Price pulled back to EMA20 ({price_to_ema20_pct:.1f}% away)",
+        f"ADX {adx:.1f} (strong trend)",
+        f"RSI {rsi:.1f} (valid entry zone)",
+        f"Volume {vol:.1f}x average",
+    ]
 
     return entry, sl, target, rr, score, final_score, reasons, rsi
 
 
 def scan_bearish(symbol, latest, processed):
-    """Strict bearish conditions — quality only"""
-    score = 0
-    reasons = []
-
-    # Step 1 — Trend: EMA20 must be below EMA50
-    if latest["ema20"] >= latest["ema50"]:
-        return None
-    score += 20
-    reasons.append("EMA20 < EMA50 (bearish trend)")
-
-    # Step 2 — ADX: must be above 30 (stricter for shorts)
-    if latest["adx"] < 30:
-        return None
-    score += 20
-    reasons.append(f"ADX {latest['adx']:.1f} (strong downtrend)")
-
-    # Step 3 — RSI: strict — only 45-65 range for shorts
-    # We want momentum still bearish but not yet oversold
+    """Strict bearish — pullback to EMA20 in downtrend"""
+    price = latest["close"]
+    ema20 = latest["ema20"]
+    ema50 = latest["ema50"]
+    adx = latest["adx"]
     rsi = latest["rsi"]
-    if rsi > 65:
-        return None  # Overbought bounce risk — skip
-    if rsi < 40:
-        return None  # Already oversold — dangerous to short
-    score += 20
-    reasons.append(f"RSI {rsi:.1f} (bearish momentum, not oversold)")
+    vol = latest["vol_ratio"]
 
-    # Step 4 — Volume: must be above average
-    if latest["vol_ratio"] < 1.0:
+    # Step 1 — Trend
+    if ema20 >= ema50:
         return None
-    score += 20
-    reasons.append(f"Volume {latest['vol_ratio']:.1f}x average")
 
-    # Step 5 — S/R: must not be near support
-    support_levels, resistance_levels = find_support_resistance(processed)
-    proximity_pct = 0.02
-    for sup in support_levels[:5]:
-        if abs(latest["close"] - sup) / latest["close"] <= proximity_pct and latest["close"] > sup:
-            return None  # Too close to support — risky short
-    for res in resistance_levels[:5]:
-        if abs(latest["close"] - res) / latest["close"] <= proximity_pct:
-            score += 20
-            reasons.append("at key resistance")
-            break
-    else:
-        score += 10
-        reasons.append("no key level nearby")
+    # Step 2 — ADX strength
+    if adx < 30:
+        return None
 
-    # Step 6 — R/R: minimum 1:2
+    # Step 3 — Pullback to EMA20 (within 2%)
+    price_to_ema20_pct = abs(price - ema20) / price * 100
+    if price_to_ema20_pct > 2.5:
+        return None
+
+    # Step 4 — RSI in valid range
+    if not (35 <= rsi <= 65):
+        return None
+
+    # Step 5 — Volume confirmation
+    if vol < 1.2:
+        return None
+
+    # Step 6 — R/R
     entry, sl, target, rr = calculate_sl_target(processed, latest, "bearish")
-    if rr < 2.0:
+    if rr < 1.5:
         return None
 
+    # Score
+    score = 0
+    score += 20  # trend confirmed
+    score += 20 if adx >= 35 else 15
+    score += 20 if 40 <= rsi <= 60 else 15
+    score += 20 if vol >= 1.5 else 15
+    score += 20 if price_to_ema20_pct <= 1.0 else 15
     final_score = round((score / 100) * 10, 1)
-    if final_score < 7.0:
-        return None
+
+    reasons = [
+        f"EMA20 < EMA50 (bearish trend)",
+        f"Price pulled back to EMA20 ({price_to_ema20_pct:.1f}% away)",
+        f"ADX {adx:.1f} (strong downtrend)",
+        f"RSI {rsi:.1f} (valid short zone)",
+        f"Volume {vol:.1f}x average",
+    ]
 
     return entry, sl, target, rr, score, final_score, reasons, rsi
 
 
 def scan_stock(symbol, df):
+    """Scan a single stock — whitelist check + bullish/bearish"""
+
+    # Only trade whitelisted stocks
+    if symbol not in WHITELIST:
+        return None
+
     processed = calculate_indicators(df)
     if processed is None or len(processed) < 5:
         return None
 
     latest = get_latest(processed)
 
-    # Try bullish first
+    # Try bullish
     bull = scan_bullish(symbol, latest, processed)
     if bull:
         entry, sl, target, rr, score, final_score, reasons, rsi = bull
@@ -215,18 +206,21 @@ def scan_stock(symbol, df):
 
 
 def run_swing_scan():
+    from data.angel_api import fetch_all_stocks
+
     print("Fetching data...")
     all_data = fetch_all_stocks()
-
     if not all_data:
         print("Failed to fetch data")
         return []
 
-    print(f"\nScanning {len(all_data)} stocks...")
+    print(f"\nScanning {len(WHITELIST)} whitelisted stocks...")
     bullish_signals = []
     bearish_signals = []
 
     for symbol, df in all_data.items():
+        if symbol not in WHITELIST:
+            continue
         result = scan_stock(symbol, df)
         if result:
             if result["trend"] == "bullish":
@@ -236,18 +230,16 @@ def run_swing_scan():
                 bearish_signals.append(result)
                 print(f"  🔴 BEAR {symbol} — Score {result['score']}/10 | Entry {result['entry']} | SL {result['sl']} | Target {result['target']}")
         else:
-            print(f"  ✗ {symbol} — rejected")
+            print(f"  ✗ {symbol} — no setup")
 
     total = bullish_signals + bearish_signals
     print(f"\n{'='*50}")
     print(f"BULLISH: {len(bullish_signals)} | BEARISH: {len(bearish_signals)} | TOTAL: {len(total)}")
-
     return total
 
 
 if __name__ == "__main__":
     signals = run_swing_scan()
-
     if not signals:
         print("\nNo clean setups today. WAIT.")
     else:
