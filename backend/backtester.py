@@ -1,21 +1,19 @@
 """
-Backtester v2 — Intraday Signal Engine
-═══════════════════════════════════════
-Rules applied on top of the 7-layer signal engine:
+Backtester v3 — Full 7-Layer Strategy Backtest
+═══════════════════════════════════════════════
+Now calls analyse_symbol() from signal_engine.py directly —
+the EXACT same logic as the live dashboard:
 
-  A. Time Window
-     • Entries ONLY between 09:30 and 10:30  (prime money-making window)
-     • NO new entries after 13:45            (no-trade zone)
-     • EOD hard exit at 15:15
+  Core    : ORB + VWAP + RSI  (≥2/3 must agree)
+  Filters : Volume Spike + Supertrend(7,3) + MACD(12,26,9)  [all 3 must pass]
+  Context : Nifty trend alignment  (soft block → WEAK signal)
 
-  B. VWAP + 9 EMA Dynamic Exit
-     • For a live SELL trade: if price crosses BACK above VWAP or EMA9
-       → exit immediately (VWAP_EXIT), don't wait for SL
-     • For a live BUY trade: if price crosses BACK below VWAP and EMA9
-       → exit immediately (VWAP_EXIT)
-
-  C. SL capped at 1.5% of entry price
-     (prevents absurdly wide ORB stops like the ₹8.27 gap on Apr 13)
+Additional backtest-specific rules:
+  A. Time Window   : entries only 09:30–10:30
+  B. VWAP+EMA9 exit: dynamic exit if price crosses back through VWAP/EMA9
+  C. SL cap 1.5%  : already inside signal_engine._add_risk
+  D. Cooldown      : 10-candle block after VWAP_EXIT in same direction
+  E. WEAK signals  : treated as valid entries (Nifty data limited in backtest)
 """
 
 import pandas as pd
@@ -27,18 +25,23 @@ from typing import Optional
 
 IST = pytz.timezone("Asia/Kolkata")
 
-from signal_engine import calculate_vwap, calculate_ema, calculate_rsi
+# ── Import the FULL live signal engine ───────────────
+from signal_engine import (
+    analyse_symbol,
+    calculate_vwap,
+    calculate_ema,
+)
 
-# ── Entry / exit time gates ───────────────────
-ENTRY_START   = dtime(9, 30)    # earliest entry
-ENTRY_CUTOFF  = dtime(10, 30)   # last allowed new entry
-NO_TRADE_ZONE = dtime(13, 45)   # no entries after this
-EOD_EXIT_TIME = dtime(15, 15)   # hard close all positions
+# ── Time gates ────────────────────────────────────────
+ENTRY_START   = dtime(9, 30)
+ENTRY_CUTOFF  = dtime(10, 30)
+EOD_EXIT_TIME = dtime(15, 15)
+COOLDOWN_CANDLES = 10          # candles to wait after VWAP_EXIT
 
 
-# ═══════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
 # DATA STRUCTURES
-# ═══════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
 
 @dataclass
 class Trade:
@@ -50,13 +53,17 @@ class Trade:
     stop_loss: float
     target_1r: float
     target_2r: float
-    exit_price: float = 0.0
-    exit_time: str    = ""
-    exit_reason: str  = ""   # SL_HIT / T1_HIT / T2_HIT / VWAP_EXIT / EOD_EXIT
-    pnl: float        = 0.0
-    qty: int          = 1
-    confidence: int   = 0
-    strategies: dict  = field(default_factory=dict)
+    exit_price: float  = 0.0
+    exit_time: str     = ""
+    exit_reason: str   = ""
+    pnl: float         = 0.0
+    qty: int           = 1
+    confidence: int    = 0       # core strategy votes
+    filter_score: int  = 0       # advanced filters passed
+    signal_type: str   = ""      # BUY / SELL / WEAK_BUY / WEAK_SELL
+    filters: dict      = field(default_factory=dict)
+    strategies: dict   = field(default_factory=dict)
+    blocked_by: list   = field(default_factory=list)
 
 
 @dataclass
@@ -67,6 +74,20 @@ class BacktestResult:
     total_days: int
     trades: list
     capital: float
+    signals_blocked: int = 0     # how many times full 7-layer filter blocked a trade
+    trend_scores: dict   = None  # per-day trendiness score dicts
+
+    def __post_init__(self):
+        if self.trend_scores is None:
+            self.trend_scores = {}
+
+    @property
+    def days_skipped_by_trend(self):
+        return sum(1 for v in self.trend_scores.values() if not v["pass"])
+
+    @property
+    def days_traded_by_trend(self):
+        return sum(1 for v in self.trend_scores.values() if v["pass"])
 
     @property
     def total_trades(self): return len(self.trades)
@@ -87,7 +108,7 @@ class BacktestResult:
     @property
     def max_drawdown(self):
         if not self.trades: return 0
-        peak, max_dd, running = 0, 0, 0
+        peak = max_dd = running = 0
         for t in self.trades:
             running += t.pnl
             if running > peak: peak = running
@@ -125,107 +146,172 @@ class BacktestResult:
             else: streak = 0
         return max_streak
 
-    @property
-    def skipped_no_trade_zone(self): return 0   # tracked separately in sim
 
 
-# ═══════════════════════════════════════════════
-# SIGNAL GENERATION (candle-by-candle)
-# ═══════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
+# PRE-MARKET TRENDINESS FILTER
+# ═══════════════════════════════════════════════════════
 
-def get_orb_from_slice(df: pd.DataFrame):
-    orb = df.between_time("09:15", "09:29")
-    if orb.empty: return None
-    return {"high": float(orb["high"].max()), "low": float(orb["low"].min())}
+def score_trendiness(df: pd.DataFrame, lookback_days: int = 3) -> dict:
+    """
+    Scores a stock's trendiness using the past `lookback_days` of daily closes.
+    Returns a score dict with a pass/fail recommendation.
 
+    Checks:
+      1. Net move    : abs(close[-1] - close[0]) / close[0]  ≥ 2%
+      2. Consistency : ≥ 60% of days moved in the same direction
+      3. ATR ratio   : avg daily range / avg close ≥ 0.8%  (not too flat)
+      4. Volume trend: avg volume last 3 days vs prior 3 days  ≥ 1.0x
 
-def generate_signal_at_candle(df_upto: pd.DataFrame) -> dict:
-    if len(df_upto) < 20:
-        return {"signal": "WAIT", "confidence": 0, "strategies": {},
-                "price": 0, "vwap": 0, "ema9": 0, "rsi": 0, "orb": None}
+    Score 0-4 (one point per check). Pass threshold = 2.
+    """
+    if df is None or df.empty:
+        return {"score": 0, "pass": False, "reason": "No data", "details": {}}
 
-    df = df_upto.copy()
-    df["vwap"] = calculate_vwap(df)
-    df["ema9"] = calculate_ema(df["close"], 9)
-    df["rsi"]  = calculate_rsi(df["close"], 14)
+    # Build daily OHLCV from 1-min data
+    daily = df.resample("D").agg(
+        open=("open", "first"),
+        high=("high", "max"),
+        low=("low", "min"),
+        close=("close", "last"),
+        volume=("volume", "sum"),
+    ).dropna()
 
-    latest   = df.iloc[-1]
-    prev     = df.iloc[-2]
-    price    = float(latest["close"])
-    vwap     = float(latest["vwap"])
-    ema9     = float(latest["ema9"])
-    rsi      = float(latest["rsi"])
-    prev_rsi = float(prev["rsi"])
+    if len(daily) < 2:
+        return {"score": 0, "pass": False, "reason": "Insufficient daily bars", "details": {}}
 
-    bull = bear = 0
-    strats = {}
+    recent = daily.tail(lookback_days)
+    closes = recent["close"].values
+    volumes = recent["volume"].values
 
-    if price > vwap and ema9 > vwap:
-        strats["VWAP"] = "BUY";  bull += 1
-    elif price < vwap and ema9 < vwap:
-        strats["VWAP"] = "SELL"; bear += 1
+    score = 0
+    details = {}
+
+    # 1 — Net move ≥ 2%
+    net_move_pct = abs(closes[-1] - closes[0]) / closes[0] * 100
+    details["net_move_pct"] = round(net_move_pct, 2)
+    if net_move_pct >= 2.0:
+        score += 1
+        details["net_move"] = "✓ TRENDING"
     else:
-        strats["VWAP"] = "NEUTRAL"
+        details["net_move"] = f"✗ FLAT ({net_move_pct:.1f}%)"
 
-    if float(prev["rsi"]) < 30 and rsi > prev_rsi:
-        strats["RSI"] = "BUY";   bull += 1
-    elif float(prev["rsi"]) > 70 and rsi < prev_rsi:
-        strats["RSI"] = "SELL";  bear += 1
-    else:
-        strats["RSI"] = "NEUTRAL"
-
-    orb = get_orb_from_slice(df)
-    if orb:
-        if price > orb["high"]:
-            strats["ORB"] = "BUY";  bull += 1
-        elif price < orb["low"]:
-            strats["ORB"] = "SELL"; bear += 1
+    # 2 — Directional consistency ≥ 60% of days same direction
+    if len(closes) >= 2:
+        daily_moves = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+        up_days = sum(1 for m in daily_moves if m > 0)
+        down_days = sum(1 for m in daily_moves if m < 0)
+        dominant = max(up_days, down_days)
+        consistency = dominant / len(daily_moves) if daily_moves else 0
+        direction = "UP" if up_days >= down_days else "DOWN"
+        details["direction"] = direction
+        details["consistency_pct"] = round(consistency * 100, 1)
+        if consistency >= 0.6:
+            score += 1
+            details["consistency"] = f"✓ {direction} {consistency*100:.0f}%"
         else:
-            strats["ORB"] = "IN_RANGE"
+            details["consistency"] = f"✗ CHOPPY ({consistency*100:.0f}%)"
     else:
-        strats["ORB"] = "NOT_FORMED"
+        details["consistency"] = "✗ INSUFFICIENT DATA"
 
-    confidence = max(bull, bear)
-    signal = "BUY" if bull >= 2 else ("SELL" if bear >= 2 else "WAIT")
+    # 3 — ATR ratio (volatility check — not too flat)
+    daily_ranges = (recent["high"] - recent["low"]).values
+    avg_range = daily_ranges.mean()
+    avg_close = closes.mean()
+    atr_ratio = avg_range / avg_close * 100
+    details["atr_ratio_pct"] = round(atr_ratio, 2)
+    if atr_ratio >= 0.8:
+        score += 1
+        details["volatility"] = f"✓ ACTIVE ({atr_ratio:.1f}%)"
+    else:
+        details["volatility"] = f"✗ FLAT ({atr_ratio:.1f}%)"
 
-    return {"signal": signal, "confidence": confidence, "strategies": strats,
-            "price": price, "vwap": vwap, "ema9": ema9, "rsi": rsi, "orb": orb}
+    # 4 — Volume trend (recent vs prior)
+    if len(daily) >= 4:
+        prior_vol = daily["volume"].iloc[-6:-3].mean() if len(daily) >= 6 else daily["volume"].iloc[:-3].mean()
+        recent_vol = volumes.mean()
+        vol_ratio = recent_vol / prior_vol if prior_vol > 0 else 1.0
+        details["volume_ratio"] = round(vol_ratio, 2)
+        if vol_ratio >= 1.0:
+            score += 1
+            details["volume_trend"] = f"✓ RISING ({vol_ratio:.1f}x)"
+        else:
+            details["volume_trend"] = f"✗ FALLING ({vol_ratio:.1f}x)"
+    else:
+        score += 1   # give benefit of doubt if not enough history
+        details["volume_trend"] = "? INSUFFICIENT HISTORY"
+
+    passed = score >= 2
+    reason = f"Score {score}/4 — {'TRADEABLE' if passed else 'SKIP — not trending'}"
+
+    return {
+        "score":     score,
+        "pass":      passed,
+        "reason":    reason,
+        "direction": details.get("direction", "UNKNOWN"),
+        "details":   details,
+    }
 
 
-# ═══════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
 # CORE BACKTESTER
-# ═══════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
 
 class Backtester:
     def __init__(self, capital: float = 5000.0, max_trades_per_day: int = 2,
-                 max_sl_pct: float = 0.015):
+                 trend_filter: bool = True, trend_min_score: int = 2,
+                 trend_lookback_days: int = 3):
         """
-        capital          : trading capital
-        max_trades_per_day: max entries per day
-        max_sl_pct       : SL capped at this % of entry price (Rule C — default 1.5%)
+        trend_filter       : if True, skip symbols that don't pass trendiness check
+        trend_min_score    : minimum trendiness score (0-4) to allow trading
+        trend_lookback_days: how many past days to score trendiness on
         """
-        self.capital           = capital
-        self.max_trades_per_day = max_trades_per_day
-        self.max_loss_per_trade = capital * 0.01
-        self.max_sl_pct        = max_sl_pct
+        self.capital             = capital
+        self.max_trades_per_day  = max_trades_per_day
+        self.max_loss_per_trade  = capital * 0.01
+        self.trend_filter        = trend_filter
+        self.trend_min_score     = trend_min_score
+        self.trend_lookback_days = trend_lookback_days
 
-    def run(self, df: pd.DataFrame, symbol: str) -> BacktestResult:
-        df = df.copy()
-        if not hasattr(df.index, "date"):
-            df.index = pd.to_datetime(df.index)
-        if df.index.tzinfo is None:
-            df.index = df.index.tz_localize(IST)
-        else:
-            df.index = df.index.tz_convert(IST)
+    def run(self, df: pd.DataFrame, symbol: str,
+            nifty_df: pd.DataFrame | None = None) -> BacktestResult:
+        """
+        df       : full historical 1-min OHLCV for the symbol
+        nifty_df : full historical 1-min OHLCV for Nifty (optional, for MTF filter)
+        """
+        df = self._ensure_tz(df)
+        if nifty_df is not None:
+            nifty_df = self._ensure_tz(nifty_df)
 
-        trading_days = sorted(set(df.index.date))
-        all_trades   = []
+        trading_days    = sorted(set(df.index.date))
+        all_trades      = []
+        total_blocked   = 0
+
+        trend_scores = {}   # date_str -> trendiness dict
 
         for day in trading_days:
             day_df = df[df.index.date == day].between_time("09:15", "15:30")
-            if len(day_df) < 20:
+            if len(day_df) < 30:
                 continue
-            all_trades.extend(self._simulate_day(day_df, symbol, str(day)))
+
+            # ── Trendiness filter: score using data BEFORE today ──────
+            if self.trend_filter:
+                history_df = df[df.index.date < day]
+                ts = score_trendiness(history_df, self.trend_lookback_days)
+                trend_scores[str(day)] = ts
+                if not ts["pass"]:
+                    continue   # skip this day entirely — stock not trending
+
+            # Slice nifty to same day
+            day_nifty = None
+            if nifty_df is not None:
+                day_nifty = nifty_df[nifty_df.index.date == day].between_time("09:15", "15:30")
+                if day_nifty.empty:
+                    day_nifty = None
+
+            trades, blocked = self._simulate_day(day_df, day_nifty, symbol, str(day))
+            all_trades.extend(trades)
+            total_blocked += blocked
 
         return BacktestResult(
             symbol=symbol,
@@ -234,19 +320,22 @@ class Backtester:
             total_days=len(trading_days),
             trades=all_trades,
             capital=self.capital,
+            signals_blocked=total_blocked,
+            trend_scores=trend_scores if self.trend_filter else {},
         )
 
-    def _simulate_day(self, day_df: pd.DataFrame, symbol: str, day_str: str) -> list:
+    def _simulate_day(self, day_df: pd.DataFrame,
+                      day_nifty: pd.DataFrame | None,
+                      symbol: str, day_str: str) -> tuple[list, int]:
         trades      = []
         in_trade    = False
         trade_count = 0
         current_trade: Optional[Trade] = None
         candles = list(day_df.iterrows())
+        blocked_count = 0
 
-        # Cooldown after VWAP_EXIT — block same-direction re-entry for N candles
-        COOLDOWN_CANDLES   = 10       # ~10 minutes on 1-min data
-        cooldown_until_idx = -1       # candle index until which re-entry is blocked
-        cooldown_direction = None     # which direction is cooling down
+        cooldown_until_idx = -1
+        cooldown_direction = None
 
         for i, (ts, candle) in enumerate(candles):
             t_time = ts.time()
@@ -254,41 +343,42 @@ class Backtester:
             lo     = float(candle["low"])
             close  = float(candle["close"])
 
-            # ── Manage open trade ─────────────────────────────────
+            # ════════════════════════════════════
+            # MANAGE OPEN TRADE
+            # ════════════════════════════════════
             if in_trade and current_trade:
                 t = current_trade
 
-                # Compute live VWAP + EMA9 for dynamic exit (Rule B)
-                df_now = day_df.iloc[: i + 1].copy()
+                # Live VWAP + EMA9 for dynamic exit
+                df_now       = day_df.iloc[: i + 1].copy()
                 df_now["vwap"] = calculate_vwap(df_now)
                 df_now["ema9"] = calculate_ema(df_now["close"], 9)
-                live_vwap = float(df_now["vwap"].iloc[-1])
-                live_ema9 = float(df_now["ema9"].iloc[-1])
+                live_vwap    = float(df_now["vwap"].iloc[-1])
+                live_ema9    = float(df_now["ema9"].iloc[-1])
 
                 hit = None
 
-                # ── Rule B: VWAP+EMA9 dynamic exit ───────────────
-                if t.direction == "SELL":
-                    # Exit SELL if price pops back above VWAP OR EMA9
-                    if close > live_vwap or close > live_ema9:
-                        hit = ("VWAP_EXIT", close)
-                elif t.direction == "BUY":
-                    # Exit BUY if price falls back below BOTH VWAP and EMA9
+                # Rule B — VWAP+EMA9 dynamic exit
+                if t.direction in ("BUY", "WEAK_BUY"):
                     if close < live_vwap and close < live_ema9:
                         hit = ("VWAP_EXIT", close)
+                elif t.direction in ("SELL", "WEAK_SELL"):
+                    if close > live_vwap or close > live_ema9:
+                        hit = ("VWAP_EXIT", close)
 
-                # ── Standard SL / Target checks ───────────────────
+                # Standard SL / Target
                 if not hit:
-                    if t.direction == "BUY":
-                        if lo <= t.stop_loss:        hit = ("SL_HIT",  t.stop_loss)
-                        elif hi >= t.target_2r:      hit = ("T2_HIT",  t.target_2r)
-                        elif hi >= t.target_1r:      hit = ("T1_HIT",  t.target_1r)
+                    base_dir = "BUY" if "BUY" in t.direction else "SELL"
+                    if base_dir == "BUY":
+                        if lo <= t.stop_loss:   hit = ("SL_HIT",  t.stop_loss)
+                        elif hi >= t.target_2r: hit = ("T2_HIT",  t.target_2r)
+                        elif hi >= t.target_1r: hit = ("T1_HIT",  t.target_1r)
                     else:
-                        if hi >= t.stop_loss:        hit = ("SL_HIT",  t.stop_loss)
-                        elif lo <= t.target_2r:      hit = ("T2_HIT",  t.target_2r)
-                        elif lo <= t.target_1r:      hit = ("T1_HIT",  t.target_1r)
+                        if hi >= t.stop_loss:   hit = ("SL_HIT",  t.stop_loss)
+                        elif lo <= t.target_2r: hit = ("T2_HIT",  t.target_2r)
+                        elif lo <= t.target_1r: hit = ("T1_HIT",  t.target_1r)
 
-                # ── EOD hard exit ─────────────────────────────────
+                # EOD exit
                 if not hit and t_time >= EOD_EXIT_TIME:
                     hit = ("EOD_EXIT", close)
 
@@ -297,94 +387,109 @@ class Backtester:
                     t.exit_price  = exit_px
                     t.exit_time   = ts.strftime("%H:%M")
                     t.exit_reason = reason
-                    t.pnl = (exit_px - t.entry_price) * t.qty if t.direction == "BUY" \
+                    base_dir = "BUY" if "BUY" in t.direction else "SELL"
+                    t.pnl = (exit_px - t.entry_price) * t.qty if base_dir == "BUY" \
                        else (t.entry_price - exit_px) * t.qty
                     trades.append(t)
-                    # If VWAP_EXIT, cool down re-entry in same direction
                     if reason == "VWAP_EXIT":
                         cooldown_until_idx = i + COOLDOWN_CANDLES
                         cooldown_direction = t.direction
-                    in_trade = False
+                    in_trade      = False
                     current_trade = None
                 continue
 
-            # ── Gate: no new entries if already in trade or limit hit ──
+            # ════════════════════════════════════
+            # LOOK FOR NEW ENTRY
+            # ════════════════════════════════════
             if in_trade or trade_count >= self.max_trades_per_day:
                 continue
 
-            # ── Rule A: Time window gate ──────────────────────────
-            if t_time < ENTRY_START:
-                continue                          # too early (ORB not confirmed)
-            if t_time > ENTRY_CUTOFF:
-                continue                          # outside prime window 9:30–10:30
+            # Rule A — time window
+            if t_time < ENTRY_START or t_time > ENTRY_CUTOFF:
+                continue
 
-            # ── Cooldown gate (post VWAP_EXIT) ────────────────────
-            # Generate signal first to know direction before blocking
-            df_upto_peek = day_df.iloc[: i + 1]
-            peek_sig = generate_signal_at_candle(df_upto_peek)
+            # ── Run FULL 7-layer signal engine ────────────────────
+            df_upto    = day_df.iloc[: i + 1]
+
+            # Build nifty slice up to this candle's timestamp
+            nifty_upto = None
+            if day_nifty is not None:
+                nifty_upto = day_nifty[day_nifty.index <= ts]
+                if nifty_upto.empty:
+                    nifty_upto = None
+
+            sig = analyse_symbol(
+                df_upto, symbol,
+                capital=self.capital,
+                nifty_df=nifty_upto
+            )
+
+            raw_signal = sig.get("signal", "WAIT")
+
+            # Accept BUY, SELL, WEAK_BUY, WEAK_SELL
+            if raw_signal not in ("BUY", "SELL", "WEAK_BUY", "WEAK_SELL"):
+                # Core was valid but hard filters blocked — count it
+                if sig.get("confidence", 0) >= 2:
+                    blocked_count += 1
+                continue
+
+            # Cooldown gate
+            base_dir = "BUY" if "BUY" in raw_signal else "SELL"
             if (i <= cooldown_until_idx and
                     cooldown_direction is not None and
-                    peek_sig["signal"] == cooldown_direction):
-                continue                          # same direction still cooling down
-            # Note: NO_TRADE_ZONE (13:45) is a secondary guard for any future
-            # strategies that widen the entry window
-
-            # ── Generate signal (reuse peek from cooldown check) ──
-            sig = peek_sig
-
-            if sig["signal"] not in ("BUY", "SELL"):
+                    base_dir in cooldown_direction):
                 continue
 
-            price = float(candle["close"])
-            orb   = sig.get("orb")
-
-            # ── Determine SL ─────────────────────────────────────
-            if orb:
-                raw_sl = orb["low"] if sig["signal"] == "BUY" else orb["high"]
-            else:
-                raw_sl = price * (1 - 0.005) if sig["signal"] == "BUY" else price * (1 + 0.005)
-
-            # ── Rule C: Cap SL at max_sl_pct of entry price ──────
-            max_sl_distance = price * self.max_sl_pct
-            if sig["signal"] == "BUY":
-                sl = max(raw_sl, price - max_sl_distance)   # don't put SL too far below
-            else:
-                sl = min(raw_sl, price + max_sl_distance)   # don't put SL too far above
-
-            risk_per_share = abs(price - sl)
-            if risk_per_share < 0.01:
-                continue
-
-            qty = max(1, int(self.max_loss_per_trade / risk_per_share))
-            t1  = price + risk_per_share if sig["signal"] == "BUY" else price - risk_per_share
-            t2  = price + 2 * risk_per_share if sig["signal"] == "BUY" else price - 2 * risk_per_share
+            price = sig.get("price") or float(candle["close"])
+            risk  = sig.get("risk", {})
+            sl    = risk.get("stop_loss_price", price * 0.985 if base_dir == "BUY" else price * 1.015)
+            t1    = risk.get("target_1R", price)
+            t2    = risk.get("target_2R", price)
+            qty   = risk.get("suggested_qty", 1)
 
             current_trade = Trade(
-                date=day_str, symbol=symbol,
-                direction=sig["signal"],
+                date=day_str,
+                symbol=symbol,
+                direction=raw_signal,
                 entry_time=ts.strftime("%H:%M"),
                 entry_price=price,
-                stop_loss=round(sl, 2),
-                target_1r=round(t1, 2),
-                target_2r=round(t2, 2),
+                stop_loss=sl,
+                target_1r=t1,
+                target_2r=t2,
                 qty=qty,
-                confidence=sig["confidence"],
-                strategies=sig["strategies"],
+                confidence=sig.get("confidence", 0),
+                filter_score=sig.get("filter_score", 0),
+                signal_type=raw_signal,
+                filters=sig.get("filters", {}),
+                strategies=sig.get("strategies", {}),
+                blocked_by=sig.get("blocked_by", []),
             )
             in_trade    = True
             trade_count += 1
 
-        # ── Force-close any open trade at EOD ────────────────────
+        # Force-close at EOD
         if in_trade and current_trade and candles:
             last_ts, last_candle = candles[-1]
             current_trade.exit_price  = float(last_candle["close"])
             current_trade.exit_time   = last_ts.strftime("%H:%M")
             current_trade.exit_reason = "EOD_EXIT"
+            base_dir = "BUY" if "BUY" in current_trade.direction else "SELL"
             current_trade.pnl = (
                 (current_trade.exit_price - current_trade.entry_price) * current_trade.qty
-                if current_trade.direction == "BUY"
+                if base_dir == "BUY"
                 else (current_trade.entry_price - current_trade.exit_price) * current_trade.qty
             )
             trades.append(current_trade)
 
-        return trades
+        return trades, blocked_count
+
+    @staticmethod
+    def _ensure_tz(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        if not hasattr(df.index, "date"):
+            df.index = pd.to_datetime(df.index)
+        if df.index.tzinfo is None:
+            df.index = df.index.tz_localize(IST)
+        else:
+            df.index = df.index.tz_convert(IST)
+        return df
