@@ -262,16 +262,44 @@ def ask_trades_via_telegram(signals, stock_universe):
         if not token:
             print(f"Token not found for {s['symbol']}")
             continue
-        add_position(
-            symbol=s["symbol"],
-            token=token,
-            entry=s["entry"],
-            sl=s["sl"],
-            target=s["target"],
-            trend=s["trend"],
-            qty=s.get("qty", 1)
-        )
-        added.append(s["symbol"])
+
+        # 🔥 ENTRY CONFIRMATION LOGIC
+        api = login()
+        current_price = get_ltp(api, s["symbol"], token) if api else None
+
+        if current_price is None:
+            print(f"Price fetch failed for {s['symbol']}")
+            continue
+
+        if s["trend"] == "bullish":
+            if current_price > s["confirmation_high"]:
+                add_position(
+                    symbol=s["symbol"],
+                    token=token,
+                    entry=current_price,
+                    sl=s["sl"],
+                    target=s["target"],
+                    trend=s["trend"],
+                    qty=s.get("qty", 1)
+                )
+                added.append(s["symbol"])
+            else:
+                print(f"⏳ Waiting breakout for {s['symbol']} (bullish)")
+
+        elif s["trend"] == "bearish":
+            if current_price < s["confirmation_low"]:
+                add_position(
+                    symbol=s["symbol"],
+                    token=token,
+                    entry=current_price,
+                    sl=s["sl"],
+                    target=s["target"],
+                    trend=s["trend"],
+                    qty=s.get("qty", 1)
+                )
+                added.append(s["symbol"])
+            else:
+                print(f"⏳ Waiting breakdown for {s['symbol']} (bearish)")
 
     if not added:
         send_message("❌ No valid positions added.")
@@ -414,7 +442,6 @@ def run_monitor(skip_market_hours_check=False):
     print("POSITION MONITOR STARTED")
     print("Checking every 5 minutes")
     print("="*50)
-
 
     # Start command listener in background
     listen_for_commands()

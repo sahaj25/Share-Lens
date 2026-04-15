@@ -76,12 +76,36 @@ def fetch_full_history(api, symbol, token, days=400):
 # ─── Trade Simulation ────────────────────────────────────────────────
 
 def simulate_trade(df, signal_day_idx, signal):
-    entry = signal["entry"]
+    trend = signal["trend"]
     sl = signal["sl"]
     target = signal["target"]
-    trend = signal["trend"]
 
-    future = df.iloc[signal_day_idx + 1: signal_day_idx + 1 + FORWARD_DAYS]
+    # 🔥 GET NEXT CANDLE FOR CONFIRMATION
+    if signal_day_idx + 1 >= len(df):
+        return "skip", None, None
+
+    next_candle = df.iloc[signal_day_idx + 1]
+
+    signal_high = df.iloc[signal_day_idx]["high"]
+    signal_low = df.iloc[signal_day_idx]["low"]
+
+    entry = None
+
+    # 🔥 CONFIRMATION LOGIC
+    if trend == "bullish":
+        if next_candle["high"] > signal_high:
+            entry = next_candle["high"]
+        else:
+            return "skip", None, None
+
+    else:  # bearish
+        if next_candle["low"] < signal_low:
+            entry = next_candle["low"]
+        else:
+            return "skip", None, None
+
+    # 🔥 FUTURE CANDLES AFTER ENTRY
+    future = df.iloc[signal_day_idx + 2: signal_day_idx + 2 + FORWARD_DAYS]
 
     if len(future) == 0:
         return "timeout", entry, entry
@@ -89,6 +113,7 @@ def simulate_trade(df, signal_day_idx, signal):
     for _, candle in future.iterrows():
         high = candle["high"]
         low = candle["low"]
+
         if trend == "bullish":
             if high >= target:
                 return "win", entry, target
@@ -102,7 +127,6 @@ def simulate_trade(df, signal_day_idx, signal):
 
     exit_price = future.iloc[-1]["close"]
 
-    # Profitable timeout = win, unprofitable = loss
     if trend == "bullish":
         return ("win", entry, exit_price) if exit_price > entry else ("loss", entry, exit_price)
     else:
@@ -150,6 +174,8 @@ def backtest_stock(symbol, df):
                     score += 20 if 40 <= rsi <= 60 else 15
                     score += 20 if vol >= 1.5 else 15
                     score += 20 if price_to_ema20_pct <= 1.0 else 15
+                    if rr < 1.5:
+                        continue
                     signal = {
                         "symbol": symbol,
                         "trend": "bullish",
@@ -160,6 +186,8 @@ def backtest_stock(symbol, df):
                         "score": round((score / 100) * 10, 1),
                         "date": str(df.index[i].date()),
                     }
+                    if signal["score"] < 7.5:
+                        continue
 
         # ── Bearish ──
         if not signal and ema20 < ema50 and adx >= 30:
@@ -192,6 +220,10 @@ def backtest_stock(symbol, df):
 
         outcome, entry_price, exit_price = simulate_trade(df, i, signal)
 
+        # 🔥 SKIP NON-TRIGGERED
+        if outcome == "skip":
+            continue
+
         pnl_pct = round((exit_price - entry_price) / entry_price * 100, 2) if signal["trend"] == "bullish" \
             else round((entry_price - exit_price) / entry_price * 100, 2)
 
@@ -207,6 +239,11 @@ def backtest_stock(symbol, df):
             "score": signal["score"],
             "outcome": outcome,
             "pnl_pct": pnl_pct,
+
+            # 🔥 ADD THESE
+            "adx": adx,
+            "rsi": rsi,
+            "vol_ratio": vol,
         })
 
     return trades
@@ -305,6 +342,10 @@ def run_backtest():
     print("\nFetching history and backtesting...")
     print("-"*55)
 
+    equity = 100000
+    peak = equity
+    max_dd = 0
+
     for i, (symbol, token) in enumerate(stocks.items(), 1):
         if symbol not in WHITELIST:
             continue
@@ -317,6 +358,17 @@ def run_backtest():
 
         trades = backtest_stock(symbol, df)
         all_trades.extend(trades)
+
+        for t in trades:
+            pnl = t["pnl_pct"] / 100 * equity
+            equity += pnl
+
+            if equity > peak:
+                peak = equity
+
+            dd = (peak - equity) / peak * 100
+            if dd > max_dd:
+                max_dd = dd
 
         wins = len([t for t in trades if t["outcome"] == "win"])
         losses = len([t for t in trades if t["outcome"] == "loss"])
@@ -334,6 +386,7 @@ def run_backtest():
         json.dump(stats, f, indent=2)
 
     print(f"\nSaved to {BACKTEST_RESULTS_FILE}")
+    print(f"\nMax Drawdown: {round(max_dd, 2)}%")
 
 
 if __name__ == "__main__":

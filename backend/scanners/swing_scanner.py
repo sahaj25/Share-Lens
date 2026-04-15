@@ -177,6 +177,8 @@ def scan_stock(symbol, df):
             "vol_ratio": round(latest["vol_ratio"], 2),
             "reasons": reasons,
             "close": latest["close"],
+            "confirmation_high": round(latest["high"], 2),
+            "confirmation_low": round(latest["low"], 2),
         }
 
     # Try bearish
