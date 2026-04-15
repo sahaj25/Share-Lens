@@ -295,24 +295,34 @@ def run():
             # ── Fetch & analyse each symbol ────────
             results = []
             for sym in symbols:
-                try:
-                    token, full_name = get_token(sym)
-                except ValueError as e:
-                    results.append({
+                def _err(msg):
+                    return {
                         "symbol": sym, "signal": "WAIT", "confidence": 0,
                         "filter_score": 0, "strategies": {}, "filters": {},
                         "blocked_by": [], "price": None, "vwap": None,
                         "rsi": None, "ema9": None, "orb": None, "risk": {},
                         "volume_spike": False, "supertrend": None, "macd": None,
-                        "nifty_trend": "UNKNOWN",
-                        "error": str(e).split("\n")[0]
-                    })
+                        "nifty_trend": "UNKNOWN", "error": msg
+                    }
+
+                try:
+                    token, full_name = get_token(sym)
+                except (ValueError, Exception) as e:
+                    results.append(_err(f"Token lookup failed: {str(e).split(chr(10))[0][:50]}"))
                     continue
 
-                df = client.get_candles(token, sym, INTERVAL, lookback_minutes=180)
-                result = analyse_symbol(df, sym, capital, nifty_df=nifty_df)
-                result["full_name"] = full_name
-                results.append(result)
+                try:
+                    df = client.get_candles(token, sym, INTERVAL, lookback_minutes=180)
+                except Exception as e:
+                    results.append(_err(f"Data fetch failed: {str(e)[:50]}"))
+                    continue
+
+                try:
+                    result = analyse_symbol(df, sym, capital, nifty_df=nifty_df)
+                    result["full_name"] = full_name
+                    results.append(result)
+                except Exception as e:
+                    results.append(_err(f"Analysis failed: {str(e)[:50]}"))
 
             # Pull nifty_trend from first result (all share same nifty_df)
             if results:

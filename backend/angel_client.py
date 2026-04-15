@@ -145,18 +145,45 @@ SYMBOL_MASTER_CACHE = "symbol_master.csv"
 
 # Fallback hardcoded tokens (used if download fails)
 _FALLBACK_TOKENS = {
-    "RELIANCE": "2885",
-    "TCS": "11536",
-    "INFY": "1594",
-    "HDFCBANK": "1333",
-    "ICICIBANK": "4963",
-    "SBIN": "3045",
-    "TATAMOTORS": "3432",
-    "WIPRO": "3787",
-    "AXISBANK": "5900",
-    "BAJFINANCE": "317",
-    "NIFTY": "26000",
-    "BANKNIFTY": "26009",
+    "RELIANCE":    "2885",
+    "TCS":         "11536",
+    "INFY":        "1594",
+    "HDFCBANK":    "1333",
+    "ICICIBANK":   "4963",
+    "SBIN":        "3045",
+    "TATAMOTORS":  "3432",
+    "WIPRO":       "3787",
+    "AXISBANK":    "5900",
+    "BAJFINANCE":  "317",
+    "NIFTY":       "26000",
+    "BANKNIFTY":   "26009",
+    # Extended watchlist
+    "ADANIPOWER":  "467",
+    "IOC":         "1624",
+    "IRFC":        "543257",
+    "GAIL":        "910",
+    "CANBK":       "4668",
+    "IDBI":        "14978",
+    "PNB":         "14977",
+    "UNIONBANK":   "2752",
+    "BANKINDIA":   "547",
+    "IOB":         "4514",
+    "SUZLON":      "3103",
+    "NHPC":        "533098",
+    "IDEA":        "14366",
+    "RPOWER":      "3812",
+    "JPPOWER":     "533152",
+    "HUDCO":       "5253",
+    "SJVN":        "533206",
+    "NBCC":        "534309",
+    "BHEL":        "438",
+    "CASTROLIND":  "558",
+    "HFCL":        "1063",
+    "GSFC":        "953",
+    "HINDCOPPER":  "543775",
+    "SCI":         "4195",
+    "RVNL":        "543544",
+    "OLAELEC":     "543888",
 }
 
 # In-memory cache after first load
@@ -195,6 +222,14 @@ def _load_symbol_master() -> pd.DataFrame | None:
         return df
     except Exception as e:
         print(f"[WARN] Could not download symbol master: {e}")
+        # Last resort — use any existing cache even if stale
+        if os.path.exists(SYMBOL_MASTER_CACHE):
+            try:
+                _symbol_master_df = pd.read_csv(SYMBOL_MASTER_CACHE, dtype=str)
+                print(f"[INFO] Using stale symbol master cache ({len(_symbol_master_df)} symbols)")
+                return _symbol_master_df
+            except Exception:
+                pass
         return None
 
 
