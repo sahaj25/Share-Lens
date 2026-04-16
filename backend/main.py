@@ -1,42 +1,130 @@
 import sys
 sys.path.append(".")
 
-from data.angel_api import fetch_all_stocks, fetch_candles
-from data.token_resolver import resolve_tokens
+from data.angel_api import fetch_all_stocks
 from indicators.technical import calculate_indicators
-from scanners.swing_scanner import scan_stock
-from scoring.engine import score_signal
+from data.token_resolver import resolve_tokens
 from alerts.telegram_bot import send_swing_alert
 from monitor.position_monitor import ask_trades_via_telegram
+
 from datetime import datetime
 import pytz
+import pandas as pd
 
 
 # ─────────────────────────────────────────────
-# MARKET TREND (NIFTY)
+# MARKET TREND
 # ─────────────────────────────────────────────
-def get_market_trend():
+def get_market_trend(all_data):
     try:
-        token = "26000"  # NIFTY
-        df = fetch_candles(None, "NIFTY", token, days=100)
-
+        df = all_data.get("NIFTY", None)
         if df is None:
             return "neutral"
 
         df = calculate_indicators(df)
-        if df is None:
-            return "neutral"
-
         latest = df.iloc[-1]
 
-        if latest["ema20"] > latest["ema50"]:
-            return "bullish"
-        else:
-            return "bearish"
-
-    except Exception as e:
-        print(f"Market trend error: {e}")
+        return "bullish" if latest["ema20"] > latest["ema50"] else "bearish"
+    except:
         return "neutral"
+
+
+# ─────────────────────────────────────────────
+# TRAILING SL LOGIC
+# ─────────────────────────────────────────────
+def apply_trailing_sl(signal, current_price):
+    entry = signal["entry"]
+    target = signal["target"]
+    sl = signal["sl"]
+
+    current_sl = sl
+
+    if signal["trend"] == "bullish":
+        move = target - entry
+
+        # move to breakeven
+        if current_price >= entry + move * 0.3:
+            current_sl = max(current_sl, entry)
+
+        # lock profit
+        if current_price >= entry + move * 0.7:
+            current_sl = max(current_sl, entry + move * 0.5)
+
+    else:
+        move = entry - target
+
+        if current_price <= entry - move * 0.3:
+            current_sl = min(current_sl, entry)
+
+        if current_price <= entry - move * 0.7:
+            current_sl = min(current_sl, entry - move * 0.5)
+
+    return round(current_sl, 2)
+
+
+# ─────────────────────────────────────────────
+# STRATEGY (RELAXED + BACKTEST ALIGNED)
+# ─────────────────────────────────────────────
+def generate_signal(symbol, df):
+    df = calculate_indicators(df)
+    if df is None or len(df) < 50:
+        return None
+
+    latest = df.iloc[-1]
+
+    price = latest["close"]
+    ema20 = latest["ema20"]
+    ema50 = latest["ema50"]
+    adx = latest["adx"]
+    rsi = latest["rsi"]
+    vol = latest["vol_ratio"]
+
+    atr = (df["high"] - df["low"]).rolling(14).mean().iloc[-1]
+
+    if pd.isna(atr) or atr == 0:
+        return None
+
+    # ── Bullish ──
+    if ema20 > ema50 and adx >= 25:
+        if abs(price - ema20) / price * 100 <= 3.0 and vol >= 1.0 and 30 <= rsi <= 70:
+
+            sl = round(price - (1.2 * atr), 2)
+            target = round(price + (3 * atr), 2)
+
+            rr = abs(target - price) / abs(price - sl)
+            if rr < 1.3:
+                return None
+
+            return {
+                "symbol": symbol,
+                "trend": "bullish",
+                "entry": round(price, 2),
+                "sl": sl,
+                "target": target,
+                "score": 8
+            }
+
+    # ── Bearish ──
+    if ema20 < ema50 and adx >= 25:
+        if abs(price - ema20) / price * 100 <= 3.0 and vol >= 1.0 and 30 <= rsi <= 70:
+
+            sl = round(price + (1.2 * atr), 2)
+            target = round(price - (3 * atr), 2)
+
+            rr = abs(target - price) / abs(price - sl)
+            if rr < 1.3:
+                return None
+
+            return {
+                "symbol": symbol,
+                "trend": "bearish",
+                "entry": round(price, 2),
+                "sl": sl,
+                "target": target,
+                "score": 8
+            }
+
+    return None
 
 
 # ─────────────────────────────────────────────
@@ -59,7 +147,7 @@ def check_exposure_limit(signals, new_signal, max_per_side=2, max_total=4):
 
 
 # ─────────────────────────────────────────────
-# MAIN SCAN
+# MAIN
 # ─────────────────────────────────────────────
 def run_morning_scan():
     print("="*50)
@@ -68,83 +156,54 @@ def run_morning_scan():
     print(f"Time: {datetime.now(ist).strftime('%d %B %Y | %I:%M %p')}")
     print("="*50)
 
-    # Step 1 — Fetch data
-    print("\n[1/4] Fetching data...")
+    print("\n[1/3] Fetching data...")
     all_data = fetch_all_stocks()
+
     if not all_data:
-        print("Failed to fetch data. Exiting.")
+        print("Failed to fetch data.")
         return
 
-    total_stocks = len(all_data)
-
-    # 🔥 MARKET TREND
-    market_trend = get_market_trend()
+    market_trend = get_market_trend(all_data)
     print(f"\nMarket Trend: {market_trend.upper()}")
 
-    # Step 2 — Scan
-    print(f"\n[2/4] Scanning {total_stocks} stocks...")
-    raw_signals = []
+    print("\n[2/3] Generating signals...")
+
+    signals = []
 
     for symbol, df in all_data.items():
-        result = scan_stock(symbol, df)
+        signal = generate_signal(symbol, df)
 
-        if not result:
+        if not signal:
             continue
 
-        # 🔥 MARKET FILTER
-        if market_trend != "neutral" and result["trend"] != market_trend:
-            print(f"  ⚠️ Skipped {symbol} — against market")
+        # Market filter
+        if market_trend != "neutral" and signal["trend"] != market_trend:
             continue
 
-        raw_signals.append(result)
+        if check_exposure_limit(signals, signal):
+            signals.append(signal)
 
-    print(f"Passed scanner: {len(raw_signals)} stocks")
+    print(f"\nFinal signals: {len(signals)}")
 
-    # Step 3 — Score
-    print(f"\n[3/4] Scoring signals...")
-    print(f"{'SYMBOL':<15} {'SCAN':<10} {'ENGINE':<10} {'TREND':<10} STATUS")
+    for s in signals:
+        print(f"→ {s['symbol']} | {s['trend']} | Entry={s['entry']} | SL={s['sl']} | TGT={s['target']}")
 
-    scored_signals = []
+    print("\n[3/3] Sending alerts...")
+    send_swing_alert(signals, len(all_data))
 
-    for signal in raw_signals:
-        scanner_score = signal.get("score", "N/A")
-        enriched = score_signal(signal)
-        engine_score = enriched.get("score", 0)
-        trend = enriched.get("trend", "unknown")
-        passed = engine_score >= 7.0
-
-        status = "PASS" if passed else "DROP"
-        print(f"{enriched['symbol']:<15} {str(scanner_score):<10} {str(engine_score):<10} {trend:<10} {status}")
-
-        if passed:
-            # 🔥 EXPOSURE CONTROL
-            if check_exposure_limit(scored_signals, enriched):
-                scored_signals.append(enriched)
-            else:
-                print(f"  ⚠️ Skipped {enriched['symbol']} — exposure full")
-
-    print(f"\nFinal signals: {len(scored_signals)}")
-
-    if scored_signals:
-        print("\nSignals selected:")
-        for s in scored_signals:
-            print(f"→ {s['symbol']} | score={s['score']} | trend={s['trend']}")
-
-    # Step 4 — Alert
-    print(f"\n[4/4] Sending Telegram alert...")
-    send_swing_alert(scored_signals, total_stocks)
-
-    # Step 5 — Monitor
-    if scored_signals:
+    # 🔥 MONITOR WITH TRAILING SL
+    if signals:
         stock_universe = resolve_tokens()
-        ask_trades_via_telegram(scored_signals, stock_universe)
+
+        # Attach trailing SL initially
+        for s in signals:
+            s["trailing_sl"] = s["sl"]
+
+        ask_trades_via_telegram(signals, stock_universe)
 
     print("\nScan complete.")
-    print("="*50)
 
 
-# ─────────────────────────────────────────────
-# ENTRY POINT
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     run_morning_scan()

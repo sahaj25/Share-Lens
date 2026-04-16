@@ -1,14 +1,14 @@
 {
-  "total_trades": 12,
-  "wins": 9,
-  "losses": 3,
+  "total_trades": 29,
+  "wins": 18,
+  "losses": 11,
   "timeouts": 0,
-  "win_rate": 75.0,
-  "avg_win_pct": 1.79,
-  "avg_loss_pct": -4.0,
-  "expectancy": 0.34,
-  "bullish_trades": 7,
-  "bullish_win_rate": 85.7,
-  "bearish_trades": 5,
-  "bearish_win_rate": 60.0
+  "win_rate": 62.1,
+  "avg_win_pct": 2.46,
+  "avg_loss_pct": -6.0,
+  "expectancy": -0.75,
+  "bullish_trades": 16,
+  "bullish_win_rate": 75.0,
+  "bearish_trades": 13,
+  "bearish_win_rate": 46.2
 }
