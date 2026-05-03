@@ -2,6 +2,9 @@ name: Share-Lens Stock Scanner
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - share_guruji
 
 jobs:
   scan-and-notify:
