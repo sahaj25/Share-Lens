@@ -36,7 +36,7 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
-          pip install smartapi-python pyotp requests logzero
+          pip install smartapi-python pyotp requests logzero websocket-client
 
       - name: Run scanner.py
         run: |
