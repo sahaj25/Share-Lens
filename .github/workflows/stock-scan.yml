@@ -16,6 +16,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 🔍 Debug (optional but useful first time)
+      - name: Debug repo structure
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Files in repo:"
+          ls -R
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -33,7 +41,7 @@ jobs:
       - name: Run scanner.py
         run: |
           echo "▶ Running scanner.py …"
-          python scanner.py > scanner_output.txt
+          python backend/scanner.py > scanner_output.txt
           echo "--- Output ---"
           cat scanner_output.txt
         env:
@@ -44,7 +52,9 @@ jobs:
           GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
 
       - name: Send Telegram notification
-        run: python telegram_notify.py scanner_output.txt
+        run: |
+          echo "▶ Sending Telegram notification..."
+          python backend/telegram_notify.py scanner_output.txt
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_IDS:  ${{ secrets.TELEGRAM_CHAT_IDS }}
