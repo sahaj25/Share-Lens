@@ -1,0 +1,55 @@
+name: Share-Lens Stock Scanner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scan-and-notify:
+    name: Run Scanner & Notify Telegram
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          pip install requests
+
+      - name: Run scanner.py
+        run: |
+          echo "▶ Running scanner.py …"
+          python scanner.py > scanner_output.txt
+          echo "--- Output ---"
+          cat scanner_output.txt
+        env:
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+          GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Send Telegram notification
+        run: python telegram_notify.py scanner_output.txt
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_IDS:  ${{ secrets.TELEGRAM_CHAT_IDS }}
+
+      - name: Upload scanner output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanner-output-${{ github.run_number }}
+          path: scanner_output.txt
+          retention-days: 7
