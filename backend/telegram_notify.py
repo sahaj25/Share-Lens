@@ -1,9 +1,8 @@
 """
 telegram_notify.py
 ------------------
-Reads scanner output and sends a formatted Telegram message.
-
-Now uses HTML mode (safer than Markdown)
+Reads scanner output and sends formatted Telegram messages.
+Automatically splits large ticker lists into multiple messages.
 """
 
 import os
@@ -20,24 +19,19 @@ CHAT_IDS = [
     if cid.strip()
 ]
 
+MAX_CHARS = 3800  # Telegram limit is 4096; keep buffer
+
 
 def send_message(text: str) -> None:
-    """Send the same message to every chat ID."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
     for chat_id in CHAT_IDS:
-        payload = {
+        resp = requests.post(url, json={
             "chat_id": chat_id,
             "text": text,
-            "parse_mode": "HTML",   # ✅ switched to HTML
+            "parse_mode": "HTML",
             "disable_web_page_preview": True,
-        }
-
-        resp = requests.post(url, json=payload, timeout=15)
-
-        # 🔍 Debug response (important)
-        print(f"Telegram response: {resp.status_code} - {resp.text}")
-
+        }, timeout=15)
+        print(f"Telegram response: {resp.status_code} - {resp.text[:120]}")
         try:
             resp.raise_for_status()
             print(f"✅ Sent to chat_id {chat_id}")
@@ -46,32 +40,35 @@ def send_message(text: str) -> None:
 
 
 def escape_html(text: str) -> str:
-    """Escape special HTML characters."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def chunk_tickers(tickers: list, max_chars: int) -> list[list]:
+    """Split tickers into groups that each fit within max_chars."""
+    chunks, current, current_len = [], [], 0
+    for t in tickers:
+        line = f"• <code>{escape_html(t)}</code>\n"
+        if current_len + len(line) > max_chars and current:
+            chunks.append(current)
+            current, current_len = [], 0
+        current.append(t)
+        current_len += len(line)
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def format_chunk(tickers: list, part: int, total_parts: int,
+                 total_tickers: int, now: str) -> str:
+    ticker_lines = "\n".join(f"• <code>{escape_html(t)}</code>" for t in tickers)
+    part_label = f"  ({part}/{total_parts})" if total_parts > 1 else ""
+
     return (
-        text.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-    )
-
-
-def format_message(raw: str) -> str:
-    lines = [line.strip() for line in raw.splitlines() if line.strip()]
-    now = datetime.now().strftime("%d %b %Y  %H:%M IST")
-
-    if not lines:
-        return f"📊 <b>Share-Lens Scanner</b> — {now}\n\nNo stocks found."
-
-    # Escape each line to avoid HTML issues
-    safe_lines = [escape_html(line) for line in lines]
-
-    ticker_lines = "\n".join(f"• <code>{t}</code>" for t in safe_lines)
-
-    return (
-        f"📊 <b>Share-Lens Scanner</b> — {now}\n"
+        f"📊 <b>Share-Lens Scanner</b>{part_label} — {now}\n"
         f"{'─' * 30}\n"
         f"{ticker_lines}\n"
         f"{'─' * 30}\n"
-        f"<b>{len(lines)} stock(s) flagged</b>"
+        f"<b>{total_tickers} stock(s) flagged</b>"
     )
 
 
@@ -82,10 +79,21 @@ def main():
     else:
         raw = sys.stdin.read()
 
-    message = format_message(raw)
-    print("Sending message:\n", message)
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    now   = datetime.now().strftime("%d %b %Y  %H:%M IST")
 
-    send_message(message)
+    if not lines:
+        send_message(f"📊 <b>Share-Lens Scanner</b> — {now}\n\nNo stocks found.")
+        return
+
+    chunks = chunk_tickers(lines, MAX_CHARS)
+    total  = len(chunks)
+    print(f"Sending {len(lines)} tickers in {total} message(s)...")
+
+    for i, chunk in enumerate(chunks, 1):
+        msg = format_chunk(chunk, i, total, len(lines), now)
+        print(f"\n--- Message {i}/{total} ---\n{msg[:200]}...")
+        send_message(msg)
 
 
 if __name__ == "__main__":
