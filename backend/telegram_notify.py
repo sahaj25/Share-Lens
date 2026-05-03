@@ -1,14 +1,9 @@
 """
 telegram_notify.py
 ------------------
-Reads a plain list of stock tickers from scanner.py output
-and sends a formatted Telegram message to one or more chat IDs.
+Reads scanner output and sends a formatted Telegram message.
 
-Expected scanner.py output (one ticker per line):
-    RELIANCE
-    TCS
-    HDFCBANK
-    INFY
+Now uses HTML mode (safer than Markdown)
 """
 
 import os
@@ -19,8 +14,6 @@ from datetime import datetime
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 
-# TELEGRAM_CHAT_IDS supports multiple IDs, comma-separated
-# e.g. "123456789,-1001234567890"
 CHAT_IDS = [
     cid.strip()
     for cid in os.environ["TELEGRAM_CHAT_IDS"].split(",")
@@ -31,32 +24,54 @@ CHAT_IDS = [
 def send_message(text: str) -> None:
     """Send the same message to every chat ID."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
     for chat_id in CHAT_IDS:
-        resp = requests.post(url, json={
+        payload = {
             "chat_id": chat_id,
             "text": text,
-            "parse_mode": "Markdown",
+            "parse_mode": "HTML",   # ✅ switched to HTML
             "disable_web_page_preview": True,
-        }, timeout=15)
-        resp.raise_for_status()
-        print(f"✅ Sent to chat_id {chat_id} (HTTP {resp.status_code})")
+        }
+
+        resp = requests.post(url, json=payload, timeout=15)
+
+        # 🔍 Debug response (important)
+        print(f"Telegram response: {resp.status_code} - {resp.text}")
+
+        try:
+            resp.raise_for_status()
+            print(f"✅ Sent to chat_id {chat_id}")
+        except Exception as e:
+            print(f"❌ Failed to send to {chat_id}: {e}")
+
+
+def escape_html(text: str) -> str:
+    """Escape special HTML characters."""
+    return (
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+    )
 
 
 def format_message(raw: str) -> str:
-    tickers = [line.strip().upper() for line in raw.splitlines() if line.strip()]
-    now     = datetime.now().strftime("%d %b %Y  %H:%M IST")
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    now = datetime.now().strftime("%d %b %Y  %H:%M IST")
 
-    if not tickers:
-        return f"📊 *Share-Lens Scanner* — {now}\n\n_No stocks found in this scan._"
+    if not lines:
+        return f"📊 <b>Share-Lens Scanner</b> — {now}\n\nNo stocks found."
 
-    ticker_lines = "\n".join(f"• `{t}`" for t in tickers)
+    # Escape each line to avoid HTML issues
+    safe_lines = [escape_html(line) for line in lines]
+
+    ticker_lines = "\n".join(f"• <code>{t}</code>" for t in safe_lines)
 
     return (
-        f"📊 *Share-Lens Scanner* — {now}\n"
+        f"📊 <b>Share-Lens Scanner</b> — {now}\n"
         f"{'─' * 30}\n"
         f"{ticker_lines}\n"
         f"{'─' * 30}\n"
-        f"_{len(tickers)} stock(s) flagged_"
+        f"<b>{len(lines)} stock(s) flagged</b>"
     )
 
 
@@ -69,6 +84,7 @@ def main():
 
     message = format_message(raw)
     print("Sending message:\n", message)
+
     send_message(message)
 
 
