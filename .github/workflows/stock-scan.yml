@@ -16,7 +16,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 🔍 Debug (optional but useful first time)
+      # 🔍 Debug (safe to keep)
       - name: Debug repo structure
         run: |
           echo "Current directory:"
@@ -33,17 +33,18 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
+          pip install smartapi-python pyotp requests logzero websocket-client
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
-          pip install smartapi-python pyotp requests logzero websocket-client
 
+      # ✅ Run scanner safely (never crash workflow)
       - name: Run scanner.py
         run: |
           echo "▶ Running scanner.py …"
-          python backend/scanner.py > scanner_output.txt
+          python backend/scanner.py > scanner_output.txt || echo "Scanner failed but continuing..."
           echo "--- Output ---"
-          cat scanner_output.txt
+          cat scanner_output.txt || echo "No output generated"
         env:
           ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
@@ -51,14 +52,16 @@ jobs:
           ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
           GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
 
+      # ✅ Telegram should NOT break workflow
       - name: Send Telegram notification
         run: |
           echo "▶ Sending Telegram notification..."
-          python backend/telegram_notify.py scanner_output.txt
+          python backend/telegram_notify.py scanner_output.txt || echo "Telegram failed, skipping..."
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_IDS:  ${{ secrets.TELEGRAM_CHAT_IDS }}
 
+      # ✅ Always upload output
       - name: Upload scanner output
         if: always()
         uses: actions/upload-artifact@v4
